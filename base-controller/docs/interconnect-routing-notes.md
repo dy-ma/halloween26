@@ -43,10 +43,10 @@ All original footprints and routed tracks were preserved byte-for-byte when savi
 
 Remaining before manufacturing: resolve the U3 thermal-hole issue; final electrical, thermal/current, assembly and mechanical reviews; verify enclosure/plug access and chosen supply/driver; then export and inspect manufacturing files. Hardware bring-up remains necessary.
 
-The original local report is `reports/interconnect-drc.json`. Regenerate current checks with the [local export workflow](../docs/releases.md); generated reports are not committed.
+The original local report is `reports/interconnect-drc.json`. Regenerate current checks with the [local export workflow](releases.md); generated reports are not committed.
 
-![Front copper and silkscreen](previews/routed-front.png)
+![Front copper and silkscreen](../previews/routed-front.png)
 
-![Back copper, viewed from the front for comparison](previews/routed-back.png)
+![Back copper, viewed from the front for comparison](../previews/routed-back.png)
 
 Backup before routing: `base-controller/placement-backups/before-inter-section-routing-20260919-231230.kicad_pcb`.

@@ -1,6 +1,6 @@
 # Overall placement draft — 2026-09-19
 
-> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../docs/verification.md) before making changes or ordering.
+> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../verification.md) before making changes or ordering.
 
 **Current handoff:** [movable section interfaces](section-interfaces.md) describes the completed local routing, named groups and remaining connections. It supersedes the placement-only coordinates/status below where later user edits differ.
 
@@ -8,7 +8,7 @@
 
 The board now has a provisional **85 × 80 mm** outline and an initial placement of all components. This is a routing starting point, not a manufacturing release. No new electrical connections were routed during this pass, and the schematic was not changed.
 
-![Placement](previews/overall-placement.png)
+![Placement](../../previews/overall-placement.png)
 
 ## Arrangement
 

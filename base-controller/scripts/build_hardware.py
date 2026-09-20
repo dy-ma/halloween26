@@ -11,8 +11,8 @@ import subprocess
 import sys
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[1]
-PROJECT = ROOT / "base-controller"
+PROJECT = Path(__file__).resolve().parents[1]
+ROOT = PROJECT.parent
 NAME = "base-controller"
 MAC_APP = Path("/Applications/KiCad/KiCad.app/Contents")
 LAYERS = "F.Cu,B.Cu,F.Paste,B.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts"
@@ -43,7 +43,7 @@ def main():
     parser.add_argument("mode", choices=["check", "release"])
     parser.add_argument("--output", type=Path, help="New/empty output directory")
     args = parser.parse_args()
-    output = (args.output or ROOT / "build" / args.mode).resolve()
+    output = (args.output or ROOT / "build" / NAME / args.mode).resolve()
     if output.exists() and any(output.iterdir()):
         parser.error(f"Output directory is not empty: {output}. Choose a new --output directory.")
     cli = os.environ.get("KICAD_CLI") or shutil.which("kicad-cli")
@@ -91,7 +91,7 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
     board, schematic = work / f"{NAME}.kicad_pcb", work / f"{NAME}.kicad_sch"
-    run([python, ROOT / "scripts/refill_zones.py", board])
+    run([python, Path(__file__).with_name("refill_zones.py"), board])
     run([cli, "sch", "erc", "--format", "json", "--output", review / "erc.json", schematic])
     run([cli, "pcb", "drc", "--schematic-parity", "--format", "json", "--output", review / "drc.json", board])
     erc = json.loads((review / "erc.json").read_text())

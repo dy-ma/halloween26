@@ -1,12 +1,12 @@
 # J2–J4 local routing — 2026-09-19
 
-> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../docs/verification.md) before making changes or ordering.
+> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../verification.md) before making changes or ordering.
 
 **Later modularity update:** the shared back ground zone described below has been split into three independent local zones, and each I/O circuit is now a movable group. See [section interfaces](section-interfaces.md) for current connections, grouping and verification. The trace routes below are unchanged.
 
 This pass routes only the motor-control interface and two limit-input circuits. It does not finish the board or connect these sections to the ESP32 or main supplies.
 
-![Front copper and component references](previews/io-routing-front.png)
+![Front copper and component references](../../previews/io-routing-front.png)
 
 ## Motor-control channels
 
@@ -30,7 +30,7 @@ All new signal traces are on **F.Cu**, 0.25 mm wide. Short ground stubs are 0.3 
 
 One local **B.Cu GND** zone covers x=85.5–110.5, y=69.5–105 mm. It uses 0.2 mm clearance and thermal pad connections (0.3 mm gap, 0.35 mm spokes). This zone connects local ground returns, but is not yet connected to the main board ground. Integrate it with the eventual board-wide ground plane, maintaining the separate eFuse RTN island and antenna clearance. The original converter zones and routing are unchanged.
 
-The front-only preview intentionally hides the back copper so the routes are visible. The [ground preview](previews/io-routing-ground.png) shows the local back plane, which obscures front traces in the combined SVG rendering. In KiCad, toggle filled-zone visibility or select F.Cu to inspect the front paths.
+The front-only preview intentionally hides the back copper so the routes are visible. The [ground preview](../../previews/io-routing-ground.png) shows the local back plane, which obscures front traces in the combined SVG rendering. In KiCad, toggle filled-zone visibility or select F.Cu to inspect the front paths.
 
 ## Remaining connections and verification
 

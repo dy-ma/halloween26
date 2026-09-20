@@ -1,12 +1,12 @@
 # Movable circuit sections
 
-> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../docs/verification.md) before making changes or ordering.
+> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../verification.md) before making changes or ordering.
 
-The sections are now interconnected, with zero unconnected items in the saved-board DRC. See [the current routing notes](interconnect-routing-notes.md). **Sections can no longer move independently without adjusting their external routes.** The historical placement notes below describe earlier stages.
+The sections are now interconnected, with zero unconnected items in the saved-board DRC. See [the current routing notes](../interconnect-routing-notes.md). **Sections can no longer move independently without adjusting their external routes.** The historical placement notes below describe earlier stages.
 
 These are **logical interfaces on one PCB**, not separate daughterboards. Existing pads and copper serve as connection points; no extra electrical components or connectors were added.
 
-![Current local routing](previews/modular-sections.png)
+![Current local routing](../../previews/modular-sections.png)
 
 ## Latest: front connector access
 
@@ -14,7 +14,7 @@ Moved the complete MCU/antenna group and J2–J4 routed groups **5 mm toward the
 
 All locally routed sections remain internally connected. DRC: 12 existing thermal-hole errors, 42 remaining unconnected items; no new clearance or silkscreen violations. Final enclosure openings and actual cable-plug clearance still require mechanical review; these measurements describe the nominal footprint geometry.
 
-![Front connector access](previews/front-access.png)
+![Front connector access](../../previews/front-access.png)
 
 ## Latest: compact layout facing the connectors
 
@@ -24,7 +24,7 @@ The MCU moved toward the limit inputs; J5 and the power jumper sit to its left, 
 
 All 167 tracks/vias and all pad net assignments were preserved. DRC: 12 existing thermal-hole errors, 42 intentionally remaining unconnected items, no new clearance/courtyard/silkscreen errors, and no internal missing connection within the seven routed sections. Inter-section routing and final mechanical review remain to do.
 
-![Compact layout](previews/compact-layout.png)
+![Compact layout](../../previews/compact-layout.png)
 
 The sections below describe earlier placement passes and may contain superseded coordinates/previews.
 
@@ -34,7 +34,7 @@ Dylan rearranged the connectors and rotated the MCU so USB faces the same right-
 
 The old outline was removed during rearrangement. Final outline, mounting-hole placement, power-block placement and inter-section routing remain unsettled. Saved-board DRC after this pass: 12 existing thermal-hole errors, missing outline, and 42 unconnected items; no new placement violations. The older coordinates and preview below describe the earlier arrangement.
 
-![Updated I/O placement](previews/io-support-placement.png)
+![Updated I/O placement](../../previews/io-support-placement.png)
 
 ## Section connection table
 

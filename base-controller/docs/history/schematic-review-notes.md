@@ -1,6 +1,6 @@
 # Saved schematic review — before PCB placement
 
-> Historical pre-layout review. Its ERC counts and proposed connector references are superseded by [the current verification checklist](docs/verification.md). The saved design now has J6 (USB power jumper), J7 (motor power output), and zero ERC issues.
+> Historical pre-layout review. Its ERC counts and proposed connector references are superseded by [the current verification checklist](../verification.md). The saved design now has J6 (USB power jumper), J7 (motor power output), and zero ERC issues.
 
 Read-only schematic review requested at the end of the user's session. Schematic and PCB were not modified. KiCad netlist export and ERC completed; ERC reported 12 errors and 4 warnings. This is a connectivity and completion check, not a manufacturing release or complete electrical validation.
 
@@ -25,8 +25,8 @@ Read-only schematic review requested at the end of the user's session. Schematic
 
 ## Before committing to routing
 
-- Add J6 motor power output on 24V_IN/GND. The recommendation is now one replaceable inline upstream fuse and a 5 A PCB distribution design target; final fuse rating and protection coordination depend on hardware/load. See electrical-decisions.md. Existing approximately 1 A eFuse remains on the logic branch.
-- XIAO pad 14 is directly connected to USB VBUS in Seeed's schematic. Proposed resolution: removable JP1 between D1 cathode and pad 14; remove it whenever using USB. This is not implemented yet. See electrical-decisions.md for operating modes.
+- Add J6 motor power output on 24V_IN/GND. The recommendation is now one replaceable inline upstream fuse and a 5 A PCB distribution design target; final fuse rating and protection coordination depend on hardware/load. See [electrical decisions](../electrical-decisions.md). Existing approximately 1 A eFuse remains on the logic branch.
+- XIAO pad 14 is directly connected to USB VBUS in Seeed's schematic. Proposed resolution: removable JP1 between D1 cathode and pad 14; remove it whenever using USB. This is not implemented yet. See [electrical decisions](../electrical-decisions.md) for operating modes.
 - Documented interface candidate: STEPPERONLINE DM542T V4.0 with 5 V selection. Existing open-collector topology matches; EASON clone specifics remain unverified. Driver purchase must meet the documented interface contract. Transistor-off is not automatically motor-disabled.
 - Plan board outline, mounting holes, connector access, XIAO antenna keepout and converter placement/layout from the datasheet before routing.
 - Complete ERC cleanup. Buck capacitor effective capacitance, thermal/current sizing and final mechanical footprint checks remain part of final design validation.
@@ -35,4 +35,4 @@ Suggested next session: fix labels/metadata/footprints, complete outstanding pow
 
 ## Current documentation
 
-See README.md for architecture, parts-list.md for the grouped planning BOM, and electrical-decisions.md for proposed J6/JP1 and the power-harness approach. These files distinguish current schematic contents from additions; no schematic edits were made during the documentation work.
+See [the board README](../../README.md) for architecture, [the parts list](../parts-list.md) for the grouped planning BOM, and [electrical decisions](../electrical-decisions.md) for proposed J6/JP1 and the power-harness approach. These files distinguish current schematic contents from additions; no schematic edits were made during the documentation work.

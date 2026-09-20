@@ -1,6 +1,6 @@
 # Motor controller parts sourcing
 
-For the consolidated current architecture and planning BOM, use [README.md](README.md), [parts-list.md](parts-list.md), and [electrical-decisions.md](electrical-decisions.md). Older sections below preserve sourcing history and may describe superseded choices. Stock values are dated snapshots.
+For the consolidated current architecture and planning BOM, use [README.md](../README.md), [parts-list.md](parts-list.md), and [electrical-decisions.md](electrical-decisions.md). Older sections below preserve sourcing history and may describe superseded choices. Stock values are dated snapshots.
 
 ## Current connector and debug decisions — supersedes shortlist below
 

@@ -12,7 +12,7 @@ Status recorded 2026-09-20 using KiCad 9.0.6. The initial design is complete eno
 | PCB DRC | 0 errors/warnings after the U3 thermal-via update |
 | QR render | Decodes to `https://www.dyma.dev/articles/tractor-driver` from the underside |
 
-These results include refilling zones in a disposable copy. Run `python3 scripts/build_hardware.py check` from the repository root for current JSON reports, schematic PDF, PCB SVGs, BOM, and native KiCad position CSV. Generated reports remain local under `build/`; they are not a substitute for the checks below.
+These results include refilling zones in a disposable copy. Run `python3 base-controller/scripts/build_hardware.py check` from the repository root for current JSON reports, schematic PDF, PCB SVGs, BOM, and native KiCad position CSV. Generated reports remain local under `build/`; they are not a substitute for the checks below.
 
 ## Sourcing metadata found during this review
 

@@ -2,11 +2,11 @@
 
 Copyright © 2026 Dylan Ang.
 
-Original hardware design and its design documentation in this repository are licensed under **CERN-OHL-P-2.0**, as provided in [LICENSE](LICENSE). Original build scripts under `scripts/` are licensed under **MIT**, as provided in [LICENSES/MIT.txt](LICENSES/MIT.txt).
+Original hardware design and its design documentation in this repository are licensed under **CERN-OHL-P-2.0**, as provided in [LICENSE](LICENSE). Original build scripts in each board’s `scripts/` directory are licensed under **MIT**, as provided in [LICENSES/MIT.txt](LICENSES/MIT.txt).
 
 Source location: https://github.com/dy-ma/halloween26
 
-The design is provided without warranty. See the applicable license for its terms. The current prototype has not been tested on hardware; see [verification status](docs/verification.md).
+The design is provided without warranty. See the applicable license for its terms. The current prototype has not been tested on hardware; see [verification status](base-controller/docs/verification.md).
 
 ## Third-party library material
 

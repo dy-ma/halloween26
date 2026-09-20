@@ -1,6 +1,6 @@
 # Converter placement starting point
 
-> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../docs/verification.md) before making changes or ordering.
+> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../verification.md) before making changes or ordering.
 
 Local routing was subsequently added; see [converter-routing-notes.md](converter-routing-notes.md). The notes below describe the earlier placement-only step.
 

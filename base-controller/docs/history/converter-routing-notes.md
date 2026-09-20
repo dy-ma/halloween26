@@ -1,6 +1,6 @@
 # Converter routing: first pass
 
-> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../docs/verification.md) before making changes or ordering.
+> Design history: positions, counts, and pending-work statements below describe that stage of development. See [current verification status](../verification.md) before making changes or ordering.
 
 2026-09-19. Local routing added at Dylan's request. Existing component placement, reference text and the user's U2-SW-to-L1 track were preserved byte-for-byte. A backup of the previous PCB is in `placement-backups/before-converter-routing-20260919-173011.kicad_pcb`.
 
@@ -23,6 +23,6 @@ KiCad filled the zones and ran DRC with a copy of the actual project settings an
 
 This is a reviewed routing starting point, not a manufacturing release or measured EMI/thermal validation. Final board copper, routing, current/thermal checks and bring-up remain necessary. Neither placement nor routing changed the schematic, the power design or any outside component.
 
-[Traces-only preview](previews/converter-routing-traces.png) hides ground fills for readability. [Filled-copper preview](previews/converter-routing-with-zones.png) shows the actual local zones.
+[Traces-only preview](../../previews/converter-routing-traces.png) hides ground fills for readability. [Filled-copper preview](../../previews/converter-routing-with-zones.png) shows the actual local zones.
 
 To view the saved change, close the old PCB Editor view without saving and reopen the board from the project.

@@ -4,17 +4,17 @@ This board controls the stationary chain-driven mechanism for a moving Halloween
 
 The aim is a board that is understandable, easy to move as one assembly, and practical to diagnose and replace. Dylan is building the schematic and PCB in KiCad as a learning project. Expected first batch: roughly 5–10 boards, with one working mechanism initially required.
 
-**Status: two-layer routing draft complete; not ready for manufacture.** All PCB nets are connected. Saved-board DRC reports zero errors/warnings and zero unconnected items after updating U3’s thermal vias to 0.30 mm drills with 0.60 mm pads in a project-local footprint. The current outline is 92 × 69 mm. See [routing notes and front/back previews](base-controller/interconnect-routing-notes.md) for power paths, ground pours and remaining review. Checks on 2026-09-20 also report zero ERC issues and zero schematic/PCB mismatches; PCB performance and protection have not been verified on hardware.
+**Status: two-layer routing draft complete; not ready for manufacture.** All PCB nets are connected. Saved-board DRC reports zero errors/warnings and zero unconnected items after updating U3’s thermal vias to 0.30 mm drills with 0.60 mm pads in a project-local footprint. The current outline is 92 × 69 mm. See [routing notes and front/back previews](interconnect-routing-notes.md) for power paths, ground pours and remaining review. Checks on 2026-09-20 also report zero ERC issues and zero schematic/PCB mismatches; PCB performance and protection have not been verified on hardware.
 
 - [Current parts list and footprints](parts-list.md)
 - [Non-PCB recommendations: supplies, inline fuse and pigtail connectors](non-pcb-components.md)
 - [Electrical decisions and remaining power work](electrical-decisions.md)
-- [Historical schematic cleanup notes](schematic-review-notes.md)
-- [KiCad library registration and provenance](base-controller/libraries/README.md)
+- [Historical schematic cleanup notes](history/schematic-review-notes.md)
+- [KiCad library registration and provenance](../libraries/README.md)
 - [Earlier sourcing research](parts-sourcing.md), including superseded options and dated stock snapshots
-- KiCad project: [base-controller](base-controller/base-controller.kicad_pro)
+- KiCad project: [base-controller](../base-controller.kicad_pro)
 
-The README and parts list describe the current direction. The original pasted brief and older sourcing notes contain earlier S3, CAN, external-converter and connector proposals; those are not the current design.
+The board README and parts list describe the current direction. The original pasted brief and older sourcing notes contain earlier S3, CAN, external-converter and connector proposals; those are not the current design.
 
 ## System architecture
 
@@ -151,6 +151,6 @@ Use `Connector:TestPoint` and `TestPoint:TestPoint_Pad_D2.0mm`. Bare pads are ex
 
 ## Verification and manufacture
 
-Initial schematic, placement, routing, mounting holes, and silkscreen are complete. Final review and hardware testing are still required. The current checklist and check results are maintained in [verification.md](docs/verification.md), and the export/release procedure is in [releases.md](docs/releases.md).
+Initial schematic, placement, routing, mounting holes, and silkscreen are complete. Final review and hardware testing are still required. The current checklist and check results are maintained in [verification.md](verification.md), and the export/release procedure is in [releases.md](releases.md).
 
 The board is not a complete machinery safety system. Stopping pulses, releasing motor holding torque and mechanically preventing a fall can be different actions; settle the actual stop behavior with the mechanism rather than assuming ENA handles all of them.

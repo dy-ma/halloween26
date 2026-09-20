@@ -11,7 +11,7 @@ Prepared for KiCad 9.0.6. Project-relative `fp-lib-table` and `sym-lib-table` fi
 
 ## Historical initial placement checklist
 
-Press A to add a symbol. Hover a placed symbol and press E to edit its properties. Put the short electrical value in Value, assign Footprint, and add hidden Manufacturer, MPN, LCSC and Voltage fields where applicable. The two Halloween symbols already contain manufacturer, MPN, LCSC and footprint fields. Use the main parts-sourcing.md for the passive manufacturers and exact MPNs.
+Press A to add a symbol. Hover a placed symbol and press E to edit its properties. Put the short electrical value in Value, assign Footprint, and add hidden Manufacturer, MPN, LCSC and Voltage fields where applicable. The two Halloween symbols already contain manufacturer, MPN, LCSC and footprint fields. Use the [parts-sourcing document](../docs/parts-sourcing.md) for the passive manufacturers and exact MPNs.
 
 Place all 12 components below (one C6 plus 11 converter parts). Leave space around the regulator for subsequent wiring. References are automatically assigned; do not worry about matching a particular U/C/R number yet.
 
@@ -33,7 +33,7 @@ For pairs, configure one completely, then duplicate it with Shift+D. The 22u/25V
 
 ### JST PA connectors — added 2026-09-19
 
-These are now unused alternatives. The user subsequently selected JST XH: J2 uses `Connector_JST:JST_XH_S6B-XH-A_1x06_P2.50mm_Horizontal`; J3/J4 use `Connector_JST:JST_XH_S2B-XH-A_1x02_P2.50mm_Horizontal`. Both are included in the installed KiCad library. See the current decisions at the top of `../../parts-sourcing.md` for sourcing fields.
+These are now unused alternatives. The user subsequently selected JST XH: J2 uses `Connector_JST:JST_XH_S6B-XH-A_1x06_P2.50mm_Horizontal`; J3/J4 use `Connector_JST:JST_XH_S2B-XH-A_1x02_P2.50mm_Horizontal`. Both are included in the installed KiCad library. See the current decisions at the top of [parts sourcing](../docs/parts-sourcing.md) for sourcing fields.
 
 - J2: `Halloween:B06B-PASK` for JST B06B-PASK(LF)(SN), LCSC C158044.
 - J3 and J4: `Halloween:B02B-PASK` for JST B02B-PASK(LF)(SN), LCSC C158050.
@@ -44,7 +44,7 @@ These are now unused alternatives. The user subsequently selected JST XH: J2 use
 
 ### MCU and converter
 
-2026-09-19 placement cleanup: moved the XIAO footprint's F.Silkscreen graphic primitives to F.Fab in the local library and placed board instance. The imported body/USB graphics crossed pads and the carrier edge. Pads and numbering are unchanged; the reference remains on silkscreen. See `../overall-placement-notes.md` for the provisional antenna reservation and remaining review.
+2026-09-19 placement cleanup: moved the XIAO footprint's F.Silkscreen graphic primitives to F.Fab in the local library and placed board instance. The imported body/USB graphics crossed pads and the carrier edge. Pads and numbering are unchanged; the reference remains on silkscreen. See [placement history](../docs/history/overall-placement-notes.md) for the provisional antenna reservation and remaining review.
 
 - C6 symbol geometry and pin numbering, and the matching footprint, come from Seeed's official library: https://github.com/Seeed-Studio/OPL_Kicad_Library/tree/master/Seeed%20Studio%20XIAO%20Series%20Library . Retrieved 2026-09-18. Source symbol library was KiCad 10 format; wrapper/properties rebuilt in KiCad 9 syntax. Pin geometry and numbering preserved. Footprint pad geometry was retained; artwork was later moved to F.Fab as described above. Source symbol treats all pins as passive; ERC cannot fully validate their electrical direction. Antenna keepout and underside-pad assembly requirements still need review before PCB layout.
 - LMR51420XDDCR symbol is adapted from the installed KiCad Regulator_Switching:LMR51430 symbol. Pin numbers verified against TI's LMR51420 datasheet: 1 GND, 2 SW, 3 VIN, 4 FB, 5 EN, 6 CB. Value, description, datasheet and footprint changed for the selected 2 A part. Added sourcing fields. https://www.ti.com/lit/ds/symlink/lmr51420.pdf
@@ -67,4 +67,4 @@ Validation: the mirrored B.Silkscreen SVG export was rasterized and successfully
 
 The change resolves the drill-size conflict without lowering project rules. Refilling the board and running KiCad 9.0.6 ERC/DRC with schematic parity gives zero findings. Imported geometry retains KiCad’s CC-BY-SA-4.0 with library exception; see [NOTICE](../../NOTICE.md).
 
-TI’s device land-pattern example uses 0.20 mm thermal holes; its [general PowerPAD application note, page 9](https://www.ti.com/lit/an/slma002h/slma002h.pdf#page=9) discusses drills of 0.33 mm or smaller for controlling solder wicking under the stated process conditions. This supports considering 0.30 mm, but does not certify our assembly process. Six inner-row holes remain at least partly exposed by the front mask opening. The center pair is directly under paste; the larger side-column holes also slightly intersect the paste edges. Backside mask coverage is unchanged. Review stencil and any plugging/filling requirements with the assembler before ordering; see [verification](../../docs/verification.md).
+TI’s device land-pattern example uses 0.20 mm thermal holes; its [general PowerPAD application note, page 9](https://www.ti.com/lit/an/slma002h/slma002h.pdf#page=9) discusses drills of 0.33 mm or smaller for controlling solder wicking under the stated process conditions. This supports considering 0.30 mm, but does not certify our assembly process. Six inner-row holes remain at least partly exposed by the front mask opening. The center pair is directly under paste; the larger side-column holes also slightly intersect the paste edges. Backside mask coverage is unchanged. Review stencil and any plugging/filling requirements with the assembler before ordering; see [verification](../docs/verification.md).
