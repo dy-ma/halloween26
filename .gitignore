@@ -19,6 +19,7 @@ fp-info-cache
 /dist/
 **/gerbers/
 **/reports/
+/base-controller/production/
 *.gbr
 *.gbrjob
 *.drl

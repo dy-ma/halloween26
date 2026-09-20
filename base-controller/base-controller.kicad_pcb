@@ -69,12 +69,12 @@
 			(hidednponfab no)
 			(sketchdnponfab yes)
 			(crossoutdnponfab yes)
-			(subtractmaskfromsilk no)
+			(subtractmaskfromsilk yes)
 			(outputformat 1)
 			(mirror no)
-			(drillshape 1)
+			(drillshape 0)
 			(scaleselection 1)
-			(outputdirectory "")
+			(outputdirectory "../build/base-controller/gerbers/")
 		)
 	)
 	(net 0 "")
@@ -173,6 +173,58 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Texas Instruments"
+			(at 0 0 90)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "e2f516e9-fbb1-44d6-8142-0f83303447ac")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "MPN" "TPS26600PWPR"
+			(at 0 0 90)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "91aebd43-5cb4-4d99-9742-0c5f80a3f296")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "LCSC" "C544399"
+			(at 0 0 90)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "f1d6c5cb-4875-43c6-a3a0-859087d88508")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Rotation Offset" "-90"
+			(at 0 0 90)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "9067ec04-7423-4984-948a-ca61fb0a90f1")
+			(effects
+				(font
+					(size 1 1)
 					(thickness 0.15)
 				)
 			)
@@ -3444,6 +3496,19 @@
 				)
 			)
 		)
+		(property "FT Rotation Offset" "180"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "aa4d638f-47a0-4387-894f-13a4032a7f12")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "CP_*")
 		(path "/3d09c35b-041b-4ef1-a70d-eb44224b5428")
 		(sheetname "/")
@@ -4833,6 +4898,19 @@
 				)
 			)
 		)
+		(property "FT Rotation Offset" "90"
+			(at 0 0 90)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "a0253fd2-a580-459f-9bff-5110cbff5653")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "SOT?23*")
 		(path "/11df4377-301e-4a31-a9b0-038697352a4f")
 		(sheetname "/")
@@ -6200,6 +6278,19 @@
 				)
 			)
 		)
+		(property "FT Rotation Offset" "180"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "e248f41b-43df-4c3d-bdf8-e20b8430e344")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "Connector*:*_1x??_*")
 		(path "/4b217868-ad2c-4bcf-979f-14a25956acc5")
 		(sheetname "/")
@@ -6910,6 +7001,32 @@
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "8c327633-320b-4a95-9776-d4a2c4a9c860")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Rotation Offset" "180"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "fcee95dc-5c3f-42e3-8798-223008511c86")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Position Offset" "0,-0.7925"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "6b9e8235-c492-4348-926c-518cca44807f")
 			(effects
 				(font
 					(size 1 1)
@@ -8685,6 +8802,19 @@
 				)
 			)
 		)
+		(property "FT Rotation Offset" "90"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "cdb6037e-f9d4-427a-96f8-fad20781d325")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "Connector*:*_1x??_*")
 		(path "/21c5690f-36bf-4933-b403-6e9790e13827")
 		(sheetname "/")
@@ -9966,6 +10096,19 @@
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "253ddbbc-56b9-43b7-bfeb-e3e15af01425")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Rotation Offset" "180"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "4acea751-a975-416b-80b6-dfe95d3af1f9")
 			(effects
 				(font
 					(size 1 1)
@@ -12400,12 +12543,38 @@
 				)
 			)
 		)
-		(property "MPN" "C720477"
+		(property "MPN" "TS-1088-AR02016"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "ba22ea34-5a5e-4393-bc44-5184061cd2ef")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "XUNPU"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "e1f9b24b-ad68-4a9a-8a44-45c487876eeb")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "LCSC" "C720477"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "9415d8a6-fa6b-44fe-a2bb-f1e8d3723991")
 			(effects
 				(font
 					(size 1 1)
@@ -13839,6 +14008,19 @@
 				)
 			)
 		)
+		(property "FT Rotation Offset" "90"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "415c2a1b-a2ac-4230-8717-9e6fada43a1f")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "Connector*:*_1x??_*")
 		(path "/f7fc8fa0-168f-4241-8672-59e3b205f4fd")
 		(sheetname "/")
@@ -14124,6 +14306,32 @@
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "a1ac5ba2-523f-4fbc-9166-b2e7616daf3c")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Rotation Offset" "180"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "6fc5b823-e08f-4dfe-83bc-5433966b20c3")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Position Offset" "0,-0.7925"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "4570b7a1-e04e-403f-8fe3-4455c4fc90e6")
 			(effects
 				(font
 					(size 1 1)
@@ -15117,6 +15325,19 @@
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "278c2d4f-bb92-48a6-a75f-c0186c8c1931")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "FT Rotation Offset" "180"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "688804ce-8c0f-462d-bf2a-deffb224c9ff")
 			(effects
 				(font
 					(size 1 1)

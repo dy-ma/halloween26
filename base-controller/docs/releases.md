@@ -10,6 +10,25 @@ Commit the source you intend to release. Use a tag such as `base-controller-v0.1
 
 ## 2. Generate the files
 
+### JLC assembly export with Fabrication Toolkit
+
+The current assembly upload uses [Fabrication Toolkit](https://github.com/bennymeg/Fabrication-Toolkit) from the KiCad Plugin and Content Manager. Save the schematic, update the PCB from it, and save the PCB before generating. Keep **Apply automatic component translations**, **Apply automatic fill for all zones**, and **Exclude DNP components from BOM** enabled. The saved defaults are in `fabrication-toolkit-options.json`.
+
+The plugin writes generated files to `base-controller/production/`, which is ignored by Git. Upload its Gerber ZIP, `bom.csv`, and `positions.csv` together. The older native KiCad position export, including a copy with only its column headings renamed, does not include these placement corrections and must not replace `positions.csv`.
+
+These hidden symbol fields are saved in the schematic and synchronized to the PCB. They correct assembly export conventions without moving the physical footprints:
+
+| References | FT Rotation Offset (degrees) | FT Position Offset (mm, local coordinates) |
+|---|---:|---|
+| J1, J7 | 180 | `0,-0.7925` |
+| J2, J3, J4 | 180 | — |
+| J5, J6 | 90 | — |
+| U2 | 90 | — |
+| U3 | -90 | — |
+| C7 | 180 | — |
+
+These corrections were reviewed against JLC's preview on 2026-09-20. Recheck placement after changing footprints, selected parts, or plugin versions. JLC's U1 model was unavailable: use the [U1 assembly reference](u1-assembly-reference.md) and request placement confirmation. U3 thermal-pad/via assembly suitability also remains a manufacturer review item. Neither export success nor the preview resolves those outstanding checks.
+
 ### Optional local export script
 
 Install KiCad 9.0.6 and its standard libraries, plus Python 3. Run from the repository root:
