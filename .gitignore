@@ -1,0 +1,36 @@
+# KiCad working files and local history
+*.kicad_prl
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*.bak
+*.bck
+*.tmp
+*~
+~*.lck
+_autosave-*
+_auto_saved_files_
+*-backups/
+placement-backups/
+.history/
+fp-info-cache
+
+# Generated manufacturing/check outputs: attached to releases, not source control
+/build/
+/dist/
+**/gerbers/
+**/reports/
+*.gbr
+*.gbrjob
+*.drl
+*.pos
+*.zip
+
+# Operating system / Python / credentials
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
