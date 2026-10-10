@@ -39,11 +39,10 @@ function WindshieldEye({
   aperture: MotionValue<number>
   reducedMotion: boolean
 }) {
-  // Curved lids overlap when closed so no white leaks through at the corners.
-  const upperY = useTransform(aperture, [0, 1], ['-44%', '-94%'])
-  const lowerY = useTransform(aperture, [0, 1], ['50%', '98%'])
-  const upperCurve = useTransform(aperture, [0, 1], ['0% 0%', '42% 8%'])
-  const lowerCurve = useTransform(aperture, [0, 1], ['0% 0%', '40% 7%'])
+  // Keep the textured lid shapes fixed so blinking only moves cached layers.
+  // 18% closed overlap covers both fixed corner curves (8% + 7%) with margin.
+  const upperY = useTransform(aperture, [0, 1], ['-38%', '-94%'])
+  const lowerY = useTransform(aperture, [0, 1], ['44%', '98%'])
   const tipping = state.mode === 'tipping'
   const startled = state.mode === 'alert' || tipping
   const idle = state.isOpen && !reducedMotion
@@ -82,8 +81,8 @@ function WindshieldEye({
           </motion.div>
         </motion.div>
       </div>
-      <motion.div className="eye-lid eye-lid--upper" style={{ y: upperY, borderBottomLeftRadius: upperCurve }} />
-      <motion.div className="eye-lid eye-lid--lower" style={{ y: lowerY, borderTopLeftRadius: lowerCurve }} />
+      <motion.div className="eye-lid eye-lid--upper" style={{ y: upperY }} />
+      <motion.div className="eye-lid eye-lid--lower" style={{ y: lowerY }} />
       <div className="eye-seal" />
     </div>
   )
