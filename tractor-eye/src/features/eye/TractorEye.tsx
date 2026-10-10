@@ -15,19 +15,20 @@ interface TractorEyeProps {
   readonly onReady?: () => void
 }
 
+// Travel stays relative to the eye-white container, not the small iris layers.
 // Long holds between quick, small glances: apprehensive, rather than shaking.
 const idleGlance = {
-  x: ['0%', '0%', '-6%', '-6%', '4%', '4%', '0%', '0%'],
-  y: ['0%', '0%', '1%', '1%', '-1%', '-1%', '0%', '0%'],
+  x: ['0cqw', '0cqw', '-6cqw', '-6cqw', '4cqw', '4cqw', '0cqw', '0cqw'],
+  y: ['0cqh', '0cqh', '1cqh', '1cqh', '-1cqh', '-1cqh', '0cqh', '0cqh'],
 }
 const idleTiming = [0, 0.28, 0.31, 0.49, 0.53, 0.71, 0.75, 1]
 const alertGlance = {
-  x: ['0%', '0%', '-2%', '-2%', '1.5%', '1.5%', '0%', '0%'],
-  y: ['0%', '0%', '-0.7%', '-0.7%', '0.5%', '0.5%', '0%', '0%'],
+  x: ['0cqw', '0cqw', '-2cqw', '-2cqw', '1.5cqw', '1.5cqw', '0cqw', '0cqw'],
+  y: ['0cqh', '0cqh', '-0.7cqh', '-0.7cqh', '0.5cqh', '0.5cqh', '0cqh', '0cqh'],
 }
 const tippingGlance = {
-  x: ['0%', '0%', '-0.5%', '-0.5%', '0.35%', '0.35%', '0%', '0%'],
-  y: ['0%', '0%', '-0.18%', '-0.18%', '0.12%', '0.12%', '0%', '0%'],
+  x: ['0cqw', '0cqw', '-0.5cqw', '-0.5cqw', '0.35cqw', '0.35cqw', '0cqw', '0cqw'],
+  y: ['0cqh', '0cqh', '-0.18cqh', '-0.18cqh', '0.12cqh', '0.12cqh', '0cqh', '0cqh'],
 }
 
 function WindshieldEye({
@@ -55,12 +56,12 @@ function WindshieldEye({
       <div className="eye-white">
         <motion.div
           className="eye-gaze"
-          animate={{ x: `${state.gaze.x * 10}%`, y: `${state.gaze.y * 22}%` }}
+          animate={{ x: `${state.gaze.x * 10}cqw`, y: `${state.gaze.y * 22}cqh` }}
           transition={{ duration: reducedMotion ? 0 : state.gazeDurationMs / 1000, ease: tipping ? 'easeInOut' : 'easeOut' }}
         >
           <motion.div
             className="eye-idle-gaze"
-            animate={idle ? (tipping ? tippingGlance : startled ? alertGlance : idleGlance) : { x: '0%', y: '0%' }}
+            animate={idle ? (tipping ? tippingGlance : startled ? alertGlance : idleGlance) : { x: '0cqw', y: '0cqh' }}
             transition={idle
               ? { duration: tipping ? 5.5 : startled ? 3.8 : 10.4, times: idleTiming, repeat: Infinity, ease: 'easeInOut' }
               : { duration: reducedMotion ? 0 : 0.2 }}

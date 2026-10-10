@@ -50,23 +50,34 @@
 .eye-white {
   position: absolute;
   inset: 0;
+  /* Keep gaze distances tied to the window even though its moving layers are small. */
+  container-type: size;
   background:
     linear-gradient(90deg, #737a6880, #b0afa326 12%, transparent 34%, transparent 60%, #8d91834d 88%, #606b6099),
     radial-gradient(ellipse at 43% 42%, #fffff5 0%, #f5f3e9 55%, #dedfd2 100%);
 }
 
 .eye-gaze,
-.eye-idle-gaze {
-  position: absolute;
-  inset: 0;
-}
-
+.eye-idle-gaze,
 .eye-iris {
   position: absolute;
+  /* Cache only iris-sized surfaces, not a whole windshield-sized moving layer. */
+  will-change: transform;
+}
+
+.eye-gaze {
   top: 39%;
   left: 60%;
   width: 31.5%;
   aspect-ratio: 1;
+}
+
+.eye-idle-gaze,
+.eye-iris {
+  inset: 0;
+}
+
+.eye-iris {
   /* A round iris viewed obliquely becomes an ellipse, not a slit pupil. */
   transform: perspective(450px) rotateY(68deg);
   border-radius: 50%;
