@@ -40,6 +40,8 @@ The static output is written to `dist/`. It can be served by the Rust `fx` servi
 
 ## Command boundary
 
+The proposed [WebSocket client contract and Pi deployment checklist](docs/websocket-and-pi.md) defines the next implementation step. Networking and service installation are not wired up yet.
+
 Commands and their Effect schema live in `src/commands/animation-command.ts`. Sources publish them through `AnimationCommandBus`; the React reducer and Motion renderer do not know whether a command came from a keyboard, WebSocket, serial bridge, or demo sequence.
 
 The future WebSocket source should:
