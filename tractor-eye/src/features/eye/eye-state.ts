@@ -9,6 +9,8 @@ export interface EyeState {
   readonly gazeDurationMs: number
   readonly blinkSequence: number
   readonly transitionDurationMs: number
+  readonly instantPose: boolean
+  readonly snapshotRevision: number
 }
 
 export function createInitialEyeState(): EyeState {
@@ -19,6 +21,8 @@ export function createInitialEyeState(): EyeState {
     gazeDurationMs: 240,
     blinkSequence: 0,
     transitionDurationMs: 1_200,
+    instantPose: false,
+    snapshotRevision: 0,
   }
 }
 
@@ -30,9 +34,25 @@ export function reduceEyeCommand(
   state: EyeState,
   command: AnimationCommand,
 ): EyeState {
+  if (command.type === 'eye/snapshot') {
+    return {
+      ...createInitialEyeState(),
+      mode: command.state.mode,
+      isOpen: command.state.mode !== 'sleeping',
+      gaze: { ...command.state.gaze },
+      gazeDurationMs: 0,
+      transitionDurationMs: 0,
+      instantPose: true,
+      snapshotRevision: state.snapshotRevision + 1,
+    }
+  }
+  // Recovery is instantaneous; subsequent live commands use normal timing.
+  if (state.instantPose) {
+    state = { ...state, instantPose: false, gazeDurationMs: 240, transitionDurationMs: 1_200 }
+  }
   switch (command.type) {
     case 'eye/wake':
-      return { ...createInitialEyeState(), transitionDurationMs: 120 }
+      return { ...createInitialEyeState(), snapshotRevision: state.snapshotRevision, transitionDurationMs: 120 }
 
     case 'eye/open':
       return {
@@ -83,6 +103,6 @@ export function reduceEyeCommand(
       }
 
     case 'system/reset':
-      return createInitialEyeState()
+      return { ...createInitialEyeState(), snapshotRevision: state.snapshotRevision }
   }
 }

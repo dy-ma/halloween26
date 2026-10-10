@@ -7,6 +7,8 @@ import {
 import { TractorEye } from './features/eye/TractorEye'
 import { keyboardCommandSource } from './sources/keyboard-command-source'
 import { wakeSequenceSource } from './sources/wake-sequence-source'
+import { createRuntimeWebSocketSource } from './sources/runtime-websocket-source'
+import { createConnectionReporter } from './network/diagnostics'
 import './App.css'
 
 function App() {
@@ -24,6 +26,11 @@ function App() {
     () => keyboardCommandSource.start(commandBus),
     [commandBus],
   )
+
+  useEffect(() => createRuntimeWebSocketSource({
+    pageUrl: window.location.href,
+    onStatus: createConnectionReporter(),
+  }).start(commandBus), [commandBus])
 
   const handleSceneReady = useCallback(() => {
     document.body.dataset.sceneReady = 'true'

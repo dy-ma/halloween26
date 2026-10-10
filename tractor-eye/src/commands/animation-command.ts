@@ -50,12 +50,23 @@ export const AnimationCommandSchema = Schema.Union([
   SystemResetCommand,
 ])
 
-export type AnimationCommand = Schema.Schema.Type<
+export type WireAnimationCommand = Schema.Schema.Type<
   typeof AnimationCommandSchema
 >
 
+export interface EyeSnapshot {
+  readonly mode: 'sleeping' | 'idle' | 'alert' | 'tipping'
+  readonly gaze: Readonly<{ x: number; y: number }>
+}
+
+// Local-only action: network peers must use the validated snapshot envelope.
+export type AnimationCommand = WireAnimationCommand | {
+  readonly type: 'eye/snapshot'
+  readonly state: EyeSnapshot
+}
+
 const decodeCommand = Schema.decodeUnknownOption(AnimationCommandSchema)
 
-export function decodeAnimationCommand(input: unknown): AnimationCommand | undefined {
+export function decodeAnimationCommand(input: unknown): WireAnimationCommand | undefined {
   return Option.getOrUndefined(decodeCommand(input))
 }

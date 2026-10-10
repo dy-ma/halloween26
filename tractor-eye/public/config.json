@@ -1,0 +1,6 @@
+{
+  "screenId": "tractor-eye",
+  "websocket": {
+    "enabled": false
+  }
+}

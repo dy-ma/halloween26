@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import {
   animate,
   motion,
@@ -56,25 +56,29 @@ function WindshieldEye({
       <div className="eye-white">
         <motion.div
           className="eye-gaze"
+          initial={false}
           animate={{ x: `${state.gaze.x * 10}cqw`, y: `${state.gaze.y * 22}cqh` }}
           transition={{ duration: reducedMotion ? 0 : state.gazeDurationMs / 1000, ease: tipping ? 'easeInOut' : 'easeOut' }}
         >
           <motion.div
             className="eye-idle-gaze"
+            initial={false}
             animate={idle ? (tipping ? tippingGlance : startled ? alertGlance : idleGlance) : { x: '0cqw', y: '0cqh' }}
             transition={idle
               ? { duration: tipping ? 5.5 : startled ? 3.8 : 10.4, times: idleTiming, repeat: Infinity, ease: 'easeInOut' }
-              : { duration: reducedMotion ? 0 : 0.2 }}
+              : { duration: reducedMotion || state.instantPose ? 0 : 0.2 }}
           >
             <motion.div
               className="eye-iris"
+              initial={false}
               animate={{ transform: `perspective(450px) rotateY(${irisAngle}deg) scale(${startled ? 0.88 : 1})` }}
-              transition={{ duration: reducedMotion ? 0 : 0.16, ease: 'easeOut' }}
+              transition={{ duration: reducedMotion || state.instantPose ? 0 : 0.16, ease: 'easeOut' }}
             >
               <motion.div
                 className="eye-pupil"
+                initial={false}
                 animate={{ scale: startled ? 0.66 : 1 }}
-                transition={{ duration: reducedMotion ? 0 : 0.16 }}
+                transition={{ duration: reducedMotion || state.instantPose ? 0 : 0.16 }}
               />
               <div className="eye-catchlight" />
               <div className="eye-catchlight eye-catchlight--small" />
@@ -96,11 +100,12 @@ export function TractorEye({ state, onReady }: TractorEyeProps) {
 
   useEffect(() => { onReady?.() }, [onReady])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const newBlink = state.blinkSequence !== lastBlink.current
     lastBlink.current = state.blinkSequence
     const opening = state.isOpen ? (state.mode === 'alert' || state.mode === 'tipping' ? 1 : 0.86) : 0
-    const blink = newBlink && state.isOpen && !reducedMotion
+    const blink = newBlink && state.isOpen && !reducedMotion && !state.instantPose
+    if (state.instantPose) aperture.set(opening)
     let playback = animate(aperture, blink ? [aperture.get(), 0, opening] : opening, {
       duration: reducedMotion ? 0 : state.transitionDurationMs / 1000,
       ...(blink ? { times: [0, 0.38, 1] } : {}),
@@ -135,13 +140,14 @@ export function TractorEye({ state, onReady }: TractorEyeProps) {
       clearTimeout(timer)
       playback.stop()
     }
-  }, [aperture, reducedMotion, state.isOpen, state.mode, state.blinkSequence, state.transitionDurationMs])
+  }, [aperture, reducedMotion, state.isOpen, state.mode, state.blinkSequence, state.transitionDurationMs, state.instantPose, state.snapshotRevision])
 
   return (
     <div className={`eye-scene eye-scene--${state.mode}`}>
       <div className="tractor-windshield" role="img" aria-label={`Right-facing tractor eye, ${state.mode}`}>
         <div className="tractor-brow" />
-        <WindshieldEye state={state} aperture={aperture} reducedMotion={reducedMotion} />
+        {/* Recovery remounts motion tracks even if a snapshot matches an in-flight target. */}
+        <WindshieldEye key={state.snapshotRevision} state={state} aperture={aperture} reducedMotion={reducedMotion} />
       </div>
     </div>
   )
