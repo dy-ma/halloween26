@@ -1,0 +1,146 @@
+.eye-scene {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  justify-items: end;
+  background:
+    radial-gradient(ellipse at 28% 28%, #b08a5b40, transparent 60%),
+    linear-gradient(90deg, #59402e, #806044 35%, #79573d 68%, #463023);
+}
+
+.eye-scene::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.38;
+  background: url('/rust-grain.svg');
+}
+
+.tractor-windshield {
+  /* Keep the lids on screen, but let the windshield wrap past the right edge. */
+  width: min(62vw, 58vh, 604px);
+  aspect-ratio: 0.66;
+  position: relative;
+  transform: translateX(16%);
+  /* Bowed rear edge: the visible patch widens as it wraps toward the front. */
+  border-radius: 28% 12% 12% 25% / 18% 8% 8% 19%;
+  padding: min(3vw, 3.2vh, 30px);
+  background:
+    url('/rust-grain.svg'),
+    linear-gradient(90deg, #6b4d35, #98734e 16%, #8a6546 62%, #68472e 88%, #493222);
+  box-shadow: inset 0 2px 2px #b49a7b88, inset 0 -5px 7px #39281988, 0 5px 8px #32221655;
+}
+
+.windshield-eye {
+  position: relative;
+  height: 100%;
+  border-radius: 26% 10% 10% 23% / 17% 7% 7% 18%;
+  overflow: hidden;
+  isolation: isolate;
+  background: #edece3;
+  border: 4px solid #292521;
+  box-shadow: 0 2px 2px #b08c6b99, 0 -2px 5px #171613;
+}
+
+.eye-white {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, #737a6880, #b0afa326 12%, transparent 34%, transparent 60%, #8d91834d 88%, #606b6099),
+    radial-gradient(ellipse at 43% 42%, #fffff5 0%, #f5f3e9 55%, #dedfd2 100%);
+}
+
+.eye-gaze,
+.eye-idle-gaze {
+  position: absolute;
+  inset: 0;
+}
+
+.eye-iris {
+  position: absolute;
+  top: 39%;
+  left: 60%;
+  width: 31.5%;
+  aspect-ratio: 1;
+  /* A round iris viewed obliquely becomes an ellipse, not a slit pupil. */
+  transform: perspective(450px) rotateY(68deg);
+  border-radius: 50%;
+  border: 2px solid #3b3228;
+  background:
+    radial-gradient(circle, transparent 48%, #554a3599 64%, #39342b 96%),
+    repeating-conic-gradient(#8d7955 0deg 6deg, #625638 7deg 11deg, #a3906a 13deg 16deg);
+  box-shadow: 0 2px 4px #262e2833, inset 0 0 4px #26281f;
+}
+
+.eye-pupil {
+  position: absolute;
+  /* The opening sits toward the far/right rim when viewed from this angle. */
+  inset: 17% 10% 17% 28%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 45% 35%, #171c1a, #080c0b 72%);
+  box-shadow: 0 0 2px 2px #3b3528;
+}
+
+.eye-catchlight {
+  position: absolute;
+  top: 19%;
+  left: 51%;
+  width: 13%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #fffff4;
+  opacity: 0.94;
+}
+
+.eye-catchlight--small {
+  top: 58%;
+  left: 72%;
+  width: 5%;
+  opacity: 0.45;
+}
+
+.eye-lid {
+  position: absolute;
+  z-index: 2;
+  inset: 0 -2%;
+  background:
+    url('/rust-grain.svg'),
+    radial-gradient(ellipse at 76% 64%, #a1714966, transparent 46%),
+    radial-gradient(ellipse at 15% 82%, #382a2088, transparent 48%),
+    linear-gradient(105deg, #564031, #926c50 26%, #75533c 58%, #624a38 85%, #463529);
+}
+
+.eye-lid--upper {
+  border-bottom: 4px solid #382b22;
+  border-radius: 0 0 18% 18% / 0 0 3% 3%;
+  box-shadow: inset 0 -3px 2px #b98b5866, 0 5px 7px #22271c66;
+}
+
+.eye-lid--lower {
+  border-top: 3px solid #493529;
+  border-radius: 18% 18% 0 0 / 3% 3% 0 0;
+  box-shadow: inset 0 3px 2px #c2966955, 0 -2px 6px #32302444;
+}
+
+.eye-seal {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* Continuous falloff across white, pupil and lids suggests curved glass. */
+  background: linear-gradient(90deg, transparent 66%, #40321f0a 79%, #30281c40 100%);
+  box-shadow: inset 0 4px 10px #29271c55, inset 4px 0 8px #29271c44, inset -4px 0 8px #29271c44;
+}
+
+.tractor-brow {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  border-radius: inherit;
+  border-top: 6px solid #b18a5a88;
+  pointer-events: none;
+}
+
