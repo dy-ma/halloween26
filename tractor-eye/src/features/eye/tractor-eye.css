@@ -19,8 +19,11 @@
 }
 
 .tractor-windshield {
-  /* Keep the lids on screen, but let the windshield wrap past the right edge. */
-  width: min(62vw, 58vh, 604px);
+  /* Size from display height, including on tall portrait prop monitors.
+     Keep the narrow proportions and let the front wrap past the right edge. */
+  height: 90vh;
+  height: 90dvh;
+  width: auto;
   aspect-ratio: 0.66;
   position: relative;
   transform: translateX(16%);
