@@ -17,6 +17,9 @@ fp-info-cache
 # Generated manufacturing/check outputs: attached to releases, not source control
 /build/
 /dist/
+/output/
+/result.json
+/sites/tipping-tractor-lab/
 **/gerbers/
 **/reports/
 /base-controller/production/
@@ -32,6 +35,9 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .venv/
+**/target/
+/fx/target-aarch64-linux/
+**/.pio/
 .env
 .env.*
 !.env.example

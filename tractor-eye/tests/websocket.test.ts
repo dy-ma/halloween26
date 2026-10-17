@@ -263,6 +263,8 @@ test('disconnect and heartbeat do not cancel an in-flight Wake', t => {
   t.mock.timers.tick(600)
   h.socket.dispatchEvent(new Event('close'))
   t.mock.timers.tick(1000)
+  assert.equal(state.mode, 'alert')
+  t.mock.timers.tick(2400)
   assert.equal(state.mode, 'tipping')
   assert.deepEqual(state.gaze, { x: -.25, y: -.65 })
 })

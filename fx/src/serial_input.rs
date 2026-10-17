@@ -1,0 +1,432 @@
+use std::{
+    collections::{HashSet, VecDeque},
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, Read, Write},
+    path::{Path, PathBuf},
+    process::Command,
+    sync::mpsc as std_mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+
+use fx_audio::{FxError, Result};
+use tokio::sync::mpsc;
+
+const SERIAL_BY_ID: &str = "/dev/serial/by-id";
+
+pub struct SerialLines {
+    reader: BufReader<File>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventMessage {
+    pub link: Option<String>,
+    pub event: String,
+    pub sequence: Option<u64>,
+    pub source: Option<String>,
+    pub rssi: Option<i64>,
+}
+
+#[derive(Debug)]
+struct OutgoingCue {
+    event: String,
+    expires_at: Instant,
+}
+
+#[derive(Clone)]
+pub struct CueLinkSender {
+    sender: std_mpsc::SyncSender<OutgoingCue>,
+}
+
+impl CueLinkSender {
+    pub fn try_emit(&self, event: String, lifetime: Duration) -> Result<()> {
+        self.sender
+            .try_send(OutgoingCue {
+                event,
+                expires_at: Instant::now() + lifetime,
+            })
+            .map_err(|error| FxError::Serial(format!("cue transmit queue unavailable: {error}")))
+    }
+}
+
+pub struct EventDeduper {
+    capacity: usize,
+    seen: HashSet<(Option<String>, Option<String>, String, u64)>,
+    order: VecDeque<(Option<String>, Option<String>, String, u64)>,
+}
+
+impl EventDeduper {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            seen: HashSet::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    /// Returns true only when the same event and sequence were already observed.
+    pub fn is_duplicate(&mut self, message: &EventMessage) -> bool {
+        let Some(sequence) = message.sequence else {
+            return false;
+        };
+        let key = (
+            message.link.clone(),
+            message.source.clone(),
+            message.event.clone(),
+            sequence,
+        );
+        if self.seen.contains(&key) {
+            return true;
+        }
+
+        self.seen.insert(key.clone());
+        self.order.push_back(key);
+        while self.order.len() > self.capacity {
+            if let Some(expired) = self.order.pop_front() {
+                self.seen.remove(&expired);
+            }
+        }
+        false
+    }
+}
+
+/// Owns one bidirectional serial Cue link. Incoming Cue JSON is normalized onto
+/// a bounded Tokio channel; outgoing Cue requests use a separate bounded queue
+/// and expire instead of being replayed late after a disconnect.
+pub fn spawn_reconnecting_link(
+    link_name: String,
+    explicit_port: Option<PathBuf>,
+    baud: u32,
+    capacity: usize,
+) -> (mpsc::Receiver<EventMessage>, CueLinkSender) {
+    let (event_sender, event_receiver) = mpsc::channel(capacity);
+    let (outgoing_sender, outgoing_receiver) = std_mpsc::sync_channel(capacity);
+    let handle = CueLinkSender {
+        sender: outgoing_sender,
+    };
+    thread::Builder::new()
+        .name(format!("fx-cue-{link_name}"))
+        .spawn(move || {
+            let mut retry_delay = Duration::from_millis(250);
+            let mut request_id = 0_u64;
+            loop {
+                let port = match select(explicit_port.clone()) {
+                    Ok(port) => port,
+                    Err(error) => {
+                        crate::fx_log!("cue link `{link_name}` unavailable: {error}; retrying");
+                        thread::sleep(retry_delay);
+                        retry_delay = (retry_delay * 2).min(Duration::from_secs(5));
+                        continue;
+                    }
+                };
+                let mut connection = match CueSerial::open(&port, baud) {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        crate::fx_log!(
+                            "could not open cue link `{link_name}` at {}: {error}; retrying",
+                            port.display()
+                        );
+                        thread::sleep(retry_delay);
+                        retry_delay = (retry_delay * 2).min(Duration::from_secs(5));
+                        continue;
+                    }
+                };
+
+                crate::fx_log!(
+                    "cue link `{link_name}` connected to {} at {baud} baud",
+                    port.display()
+                );
+                retry_delay = Duration::from_millis(250);
+                'connection: loop {
+                    while let Ok(outgoing) = outgoing_receiver.try_recv() {
+                        if Instant::now() >= outgoing.expires_at {
+                            crate::fx_log!(
+                                "dropping expired outbound cue `{}` on `{link_name}`",
+                                outgoing.event
+                            );
+                            continue;
+                        }
+                        request_id = request_id.wrapping_add(1).max(1);
+                        if let Err(error) = connection.emit(request_id, &outgoing.event) {
+                            crate::fx_log!(
+                                "cue link `{link_name}` write failed: {error}; reconnecting"
+                            );
+                            break 'connection;
+                        }
+                    }
+
+                    match connection.read_lines() {
+                        Ok(lines) => {
+                            if lines.is_empty() {
+                                thread::sleep(Duration::from_millis(2));
+                            }
+                            for line in lines {
+                                if let Some(mut message) = event_message(&line) {
+                                    message.link = Some(link_name.clone());
+                                    match event_sender.try_send(message) {
+                                        Ok(()) => {}
+                                        Err(mpsc::error::TrySendError::Full(message)) => {
+                                            crate::fx_log!(
+                                                "dropping inbound cue `{}`: runtime queue is full",
+                                                message.event
+                                            );
+                                        }
+                                        Err(mpsc::error::TrySendError::Closed(_)) => return,
+                                    }
+                                } else if emit_result(&line).is_some() {
+                                    crate::fx_log!("cue link `{link_name}` {line}");
+                                } else if !line.is_empty() {
+                                    crate::fx_log!("ignoring non-event serial line: {line}");
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            crate::fx_log!(
+                                "cue link `{link_name}` read failed: {error}; reconnecting"
+                            );
+                            break;
+                        }
+                    }
+                }
+                thread::sleep(retry_delay);
+            }
+        })
+        .expect("could not start cue serial owner thread");
+    (event_receiver, handle)
+}
+
+struct CueSerial {
+    file: File,
+    pending: Vec<u8>,
+}
+
+impl CueSerial {
+    fn open(port: &Path, baud: u32) -> Result<Self> {
+        configure_link(port, baud)?;
+        let file = OpenOptions::new().read(true).write(true).open(port)?;
+        Ok(Self {
+            file,
+            pending: Vec::with_capacity(256),
+        })
+    }
+
+    fn emit(&mut self, request: u64, event: &str) -> Result<()> {
+        self.file.write_all(&emit_command(request, event)?)?;
+        self.file.flush()?;
+        Ok(())
+    }
+
+    fn read_lines(&mut self) -> Result<Vec<String>> {
+        let mut bytes = [0_u8; 256];
+        let count = self.file.read(&mut bytes)?;
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        self.pending.extend_from_slice(&bytes[..count]);
+        if self.pending.len() > 8 * 1024 {
+            self.pending.clear();
+            return Err(FxError::Serial("serial line exceeded 8 KiB".into()));
+        }
+
+        let mut lines = Vec::new();
+        while let Some(newline) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let line = self.pending.drain(..=newline).collect::<Vec<_>>();
+            let text = String::from_utf8_lossy(&line[..line.len() - 1])
+                .trim_end_matches('\r')
+                .to_string();
+            lines.push(text);
+        }
+        Ok(lines)
+    }
+}
+
+fn emit_command(request: u64, event: &str) -> Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec(&serde_json::json!({
+        "type": "emit",
+        "request": request,
+        "event": event,
+    }))
+    .map_err(|error| FxError::Serial(format!("could not encode cue command: {error}")))?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+impl SerialLines {
+    pub fn open(port: &Path, baud: u32) -> Result<Self> {
+        configure(port, baud)?;
+        let reader = BufReader::new(File::open(port)?);
+        Ok(Self { reader })
+    }
+
+    pub fn next_line(&mut self) -> Result<Option<String>> {
+        let mut line = String::new();
+        let bytes = self.reader.read_line(&mut line)?;
+        if bytes == 0 {
+            return Ok(None);
+        }
+        Ok(Some(line.trim().to_string()))
+    }
+}
+
+pub fn devices() -> Result<Vec<PathBuf>> {
+    let mut devices = match fs::read_dir(SERIAL_BY_ID) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .collect::<Vec<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error.into()),
+    };
+    devices.sort();
+    Ok(devices)
+}
+
+pub fn select(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(port) = explicit {
+        return Ok(port);
+    }
+
+    let devices = devices()?;
+    match devices.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(FxError::Serial(
+            "no devices found under /dev/serial/by-id; connect the ESP32 or pass --port".into(),
+        )),
+        _ => Err(FxError::Serial(format!(
+            "multiple devices found; choose one with --port: {}",
+            devices
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+pub fn event_message(line: &str) -> Option<EventMessage> {
+    let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+    Some(EventMessage {
+        link: None,
+        event: value.get("event")?.as_str()?.to_string(),
+        sequence: value.get("sequence").and_then(serde_json::Value::as_u64),
+        source: value
+            .get("source")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        rssi: value.get("rssi").and_then(serde_json::Value::as_i64),
+    })
+}
+
+fn emit_result(line: &str) -> Option<&str> {
+    let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+    (value.get("type")?.as_str()? == "emit_result").then_some(line)
+}
+
+pub fn event_name(line: &str) -> Option<String> {
+    event_message(line).map(|message| message.event)
+}
+
+fn configure(port: &Path, baud: u32) -> Result<()> {
+    let output = Command::new("stty")
+        .arg("-F")
+        .arg(port)
+        .arg(baud.to_string())
+        .args(["raw", "-echo", "-ixon", "-ixoff"])
+        .output()?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = [stdout.trim(), stderr.trim()]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("; ");
+        Err(FxError::CommandFailed {
+            program: "stty".into(),
+            status: output.status,
+            stderr: detail,
+        })
+    }
+}
+
+fn configure_link(port: &Path, baud: u32) -> Result<()> {
+    let output = Command::new("stty")
+        .arg("-F")
+        .arg(port)
+        .arg(baud.to_string())
+        .args(["raw", "-echo", "-ixon", "-ixoff", "min", "0", "time", "0"])
+        .output()?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FxError::CommandFailed {
+            program: "stty".into(),
+            status: output.status,
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_event_name_from_json_line() {
+        assert_eq!(
+            event_name(r#"{"event":"tractor_tipped","sequence":42}"#),
+            Some("tractor_tipped".into())
+        );
+        assert_eq!(event_name("not json"), None);
+        assert_eq!(event_name(r#"{"sequence":42}"#), None);
+    }
+
+    #[test]
+    fn emits_the_gateway_newline_json_contract() {
+        let bytes = emit_command(42, "tractor:stepper:stroke").unwrap();
+        assert_eq!(bytes.last(), Some(&b'\n'));
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["type"], "emit");
+        assert_eq!(value["request"], 42);
+        assert_eq!(value["event"], "tractor:stepper:stroke");
+    }
+
+    #[test]
+    fn deduplicates_only_matching_source_event_and_sequence() {
+        let mut deduper = EventDeduper::new(8);
+        let first = EventMessage {
+            link: Some("radio".into()),
+            event: "horn:pushed".into(),
+            sequence: Some(7),
+            source: Some("AABBCCDDEEFF".into()),
+            rssi: Some(-67),
+        };
+        let different_event = EventMessage {
+            link: first.link.clone(),
+            event: "tractor:moo".into(),
+            sequence: Some(7),
+            source: first.source.clone(),
+            rssi: first.rssi,
+        };
+        let different_sequence = EventMessage {
+            link: first.link.clone(),
+            event: "horn:pushed".into(),
+            sequence: Some(8),
+            source: first.source.clone(),
+            rssi: first.rssi,
+        };
+        let different_source = EventMessage {
+            source: Some("112233445566".into()),
+            ..first.clone()
+        };
+
+        assert!(!deduper.is_duplicate(&first));
+        assert!(deduper.is_duplicate(&first));
+        assert!(!deduper.is_duplicate(&different_event));
+        assert!(!deduper.is_duplicate(&different_sequence));
+        assert!(!deduper.is_duplicate(&different_source));
+    }
+}

@@ -2,7 +2,7 @@
 
 Fullscreen browser animation for the Halloween tractor prop. The app is a static Vite build intended to run in Chromium kiosk mode on a Raspberry Pi. Keyboard controls and the WebSocket client publish through the same typed command bus. Serial and audio remain the responsibility of `fx`.
 
-The reference-inspired prop uses one tall, narrow white eye set into a rusty brown body panel, sized to 90% of viewport height. Its level frame extends beyond the right edge of the display so the white appears to wrap around the tractor's front corner. The iris looks forward to the right, foreshortened by the viewing angle, with rusty brown sliding lids. While open, it makes small hesitant glances and occasional double blinks. Arrow-key gaze overrides neutral-mode idle glances; alert/tipping retain their small tremor. `Home` centers the gaze. Reduced-motion preferences disable idle animation. For Pi rendering performance, the textured lids use fixed shapes with transform-only movement, and the gaze layers are iris-sized.
+The installed panel reports a 1920 x 1200 resolution and 340 x 210 mm active area. Mounted in portrait, the default rendered eye is approximately one inch wider and 1.5 inches taller than the first 88 x 265 mm template-derived layout. Its 55.6vw x 90.1vh calibration frame is about 667 x 1730 px at the Pi's 1200 x 1920 desktop. The animated eye stays inside that frame with a black safety area around it. The iris looks off to one side, foreshortened by the viewing angle, with rusty brown sliding lids. While open, it makes small hesitant glances and occasional double blinks. Arrow-key gaze overrides neutral-mode idle glances; alert/tipping retain their small tremor. `Home` centers the gaze. Reduced-motion preferences disable idle animation. For Pi rendering performance, the textured lids use fixed shapes with transform-only movement, and the gaze layers are iris-sized.
 
 ## Run locally
 
@@ -25,8 +25,18 @@ npm run dev
 | Arrow keys | Move the gaze |
 | `Home` | Center the gaze |
 | `R` | Reset |
+| `M` | Mirror the display for the opposite-facing tractor (persisted locally) |
+| `D` | Toggle the mounting guide and diagnostics |
+| `Shift` + Arrow keys | Move the eye frame by 8 px (`Alt` adds a 40 px coarse step) |
+| `Ctrl` + Left/Right | Narrow or widen by 1% (`Alt` changes by 5%) |
+| `Ctrl` + Up/Down | Make taller or shorter by 1% (`Alt` changes by 5%) |
+| `[` / `]` | Rotate by 1° (`Shift` rotates by 5°) |
+| `-` / `+` | Scale width and height together by 1% (`Alt` scales by 5%) |
+| `Shift` + `R` | Reset translation, rotation, and scale |
 
-The eye rests closed on startup, with no on-screen controls. `W` publishes `eye/wake` through the same command bus as the WebSocket source. Wake takes about 3.8 seconds: settle closed, open into a startled expression, then three quick blinks with glances moving underneath the eyelids. Each glance begins 50ms into its 220ms blink so it finishes as the lids reopen. At 1.4 seconds, directly after the final blink, the eye starts a smooth 2.4-second upward drift from the last glance's position, with no extra shakes or horizontal recentering. Tipping mode keeps the wide-eyed expression but reduces tremor amplitude to roughly a quarter of alert mode and slows it down. The frame does not rotate. Another Wake restarts the sequence; other animation commands cancel pending cues. `C`, `S`, or `R` returns the eye to rest. Transport heartbeats never enter this bus.
+Diagnostics are shown by default in the screen area outside the cutout. Translation, rotation, and scale move the animated eye and dashed cutout guide together so the guide can be aligned directly with the wood opening. Display calibration and mirror state persist in local storage on each Pi. Use `?debug=0` to start with diagnostics hidden. `?mirror=1` or `?mirror=0` can override the saved orientation for a kiosk URL.
+
+The eye rests closed on startup, with no on-screen controls. `W` publishes `eye/wake` through the same command bus as the WebSocket source. Wake snaps to a visibly closed launch pose and opens into a startled expression with an enlarged iris and pupil. The first phase spreads four quick blinks 400ms apart while rapid glances continue underneath. The second phase continues the rapid glances without blinking. At 4.0 seconds, the eye starts a smooth 2.4-second upward drift from the last glance's position, with no extra shakes or horizontal recentering. With the show's eye node scheduled at 750ms, that drift begins 4.75 seconds into the audio. Tipping mode keeps the wide-eyed expression and enlarged iris but reduces tremor amplitude to roughly a quarter of alert mode and slows it down. The frame does not rotate. Another Wake restarts the sequence; other animation commands cancel pending cues. `C`, `S`, or `R` returns the eye to rest. Transport heartbeats never enter this bus.
 
 `eye/look` accepts an optional `durationMs`, independent of eyelid timing, for slow gaze movements. `eye/mode` also accepts `tipping` for the calmer tremor. Keyboard gaze input restores a quick transition after a slow drift.
 

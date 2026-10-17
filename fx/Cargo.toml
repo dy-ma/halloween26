@@ -1,0 +1,30 @@
+[package]
+name = "fx-audio"
+version = "0.1.0"
+edition = "2024"
+description = "Play audio files on selected system audio devices"
+license = "MIT"
+
+[lib]
+name = "fx_audio"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fx"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4.6", features = ["derive"] }
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+toml = "0.9"
+tower-http = { version = "0.7", features = ["fs"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"

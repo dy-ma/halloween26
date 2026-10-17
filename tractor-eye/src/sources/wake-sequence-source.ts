@@ -1,21 +1,32 @@
 import type { AnimationCommand } from '../commands/animation-command'
 import type { AnimationCommandSource } from '../commands/command-bus'
 
-// Start each glance 50ms into a 220ms blink: it moves behind the closing lids
-// and finishes as they reopen. Gaze commands do not restart the lid animation.
+// Spread four 220ms blinks evenly across the opening movement phase. Gaze keeps
+// its faster cadence underneath, then continues without blinking.
 const wakeCues: ReadonlyArray<readonly [number, AnimationCommand]> = [
   [180, { type: 'eye/open', durationMs: 320 }],
   [500, { type: 'eye/mode', mode: 'alert' }],
   [550, { type: 'eye/blink', durationMs: 220 }],
   [600, { type: 'eye/look', x: -0.65, y: -0.12 }],
-  [850, { type: 'eye/blink', durationMs: 220 }],
   [900, { type: 'eye/look', x: 0.15, y: -0.2 }],
-  [1150, { type: 'eye/blink', durationMs: 220 }],
+  [950, { type: 'eye/blink', durationMs: 220 }],
   [1200, { type: 'eye/look', x: -0.25, y: -0.12 }],
-  // Continue from the last glance once the final blink reopens (1370ms).
+  [1350, { type: 'eye/blink', durationMs: 220 }],
+  [1500, { type: 'eye/look', x: 0.45, y: -0.18 }],
+  [1750, { type: 'eye/blink', durationMs: 220 }],
+  [1800, { type: 'eye/look', x: -0.5, y: -0.08 }],
+  [2100, { type: 'eye/look', x: 0.25, y: -0.22 }],
+  [2400, { type: 'eye/look', x: -0.6, y: -0.14 }],
+  [2700, { type: 'eye/look', x: 0.1, y: -0.18 }],
+  [3000, { type: 'eye/look', x: -0.25, y: -0.12 }],
+  [3300, { type: 'eye/look', x: 0.5, y: -0.1 }],
+  [3600, { type: 'eye/look', x: -0.45, y: -0.2 }],
+  [3900, { type: 'eye/look', x: -0.25, y: -0.12 }],
+  // With fx's 750ms route delay, this begins 4.75s into the audio at the moo.
+  // Continue from the final unaccompanied glance after the blink phase ends.
   // Keep x unchanged: recentering also turns the iris and causes a visible snap.
-  [1400, { type: 'eye/mode', mode: 'tipping' }],
-  [1400, { type: 'eye/look', x: -0.25, y: -0.65, durationMs: 2400 }],
+  [4000, { type: 'eye/mode', mode: 'tipping' }],
+  [4000, { type: 'eye/look', x: -0.25, y: -0.65, durationMs: 2400 }],
 ]
 
 export const wakeSequenceSource: AnimationCommandSource = {

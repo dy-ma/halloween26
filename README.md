@@ -8,6 +8,8 @@ Hardware, software, and build notes for our Halloween 2026 props. This repositor
 |---|---|---|
 | [Base controller](base-controller/README.md) | ESP32-C6 controller for the tractor mechanism, with external stepper-driver control, limit inputs, and onboard power conversion | Initial PCB design complete; verification in progress; not hardware-tested |
 | [Baby's first PCB](babys-first/README.md) | Small LED board used to learn KiCad | Practice project; not intended for manufacture |
+| [FX audio](fx/README.md) | Rust library providing play-a-file-on-a-device, plus a thin CLI for PipeWire and Bluetooth testing | Initial programmable primitive |
+| [Cue firmware](firmware/README.md) | Shared cue messages and non-blocking ESP-NOW transport for button nodes and the Pi serial gateway | Initial refactor; hardware verification pending |
 
 Additional boards can be added alongside these when ready. See [adding a board](docs/adding-a-board.md) for the directory convention.
 

@@ -1,18 +1,20 @@
 # Tractor eye WebSocket client and Pi deployment
 
-V1 contract for the browser client and the `fx` server. **The browser transport, runtime configuration loader, bounded decoder, and atomic snapshot handler are implemented.** The real `fx` endpoints and durable Pi startup/service units remain server/deployment work. The shipped config explicitly disables networking until a server is ready.
+V1 contract for the browser client and the `fx` server. **The browser transport, runtime configuration loader, bounded decoder, atomic snapshot handler, and real `fx` endpoints are implemented.** Durable Pi startup/service units and full on-device recovery testing remain deployment work. The source-tree development config still explicitly disables networking; the config served by `fx` enables it.
 
 The approved wake sequence is unchanged by networking. The current renderer fills 90% of viewport height and uses fixed-shape sliding lids and iris-sized gaze layers for Pi performance. Do not reintroduce per-frame lid-radius changes or windshield-sized gaze surfaces during integration.
 
-## Handoff to the fx worker
+## Implemented fx integration
 
-1. Implement the HTTP/config/health/WebSocket endpoints below. `fx` alone owns USB serial and audio; the eye never reads serial or plays sound.
-2. From a single show cue, start the selected audio and publish one enveloped `eye/wake`. Do not stream its blink or gaze sub-cues. V1 starts on receipt; it does not promise exact audio/visual timing or multi-Pi synchronization.
-3. Track each screen's session, contiguous sequence, and stable desired state. For Wake, store the final `tipping` pose immediately for reconnect recovery. Snapshot plus subscription must be atomic.
-4. Serve enabled `/config.json` (example below). Keep static assets and `/ws` on the same origin if possible. Do not use the disabled development config in the connected installation.
-5. Test against this browser client. `npm run build && npm run mock:fx` provides a reference fixture on loopback port 4174; its terminal accepts `wake`, `close`, `reset`, and `disconnect`. This is not a production server or serial/audio implementation.
+1. `fx run` owns USB serial and audio; the eye never reads serial or plays sound.
+2. A single deduplicated show cue starts all matching audio routes and publishes one enveloped screen command. Wake's blink and gaze sub-cues stay local to the browser. V1 starts on receipt; it does not promise exact audio/visual timing or multi-Pi synchronization.
+3. `fx` tracks each screen's boot-unique session, contiguous sequence, and stable desired state. For Wake, the route stores the final `tipping` pose immediately for reconnect recovery. Snapshot plus subscription is atomic.
+4. `fx` serves `/`, enabled `/config.json`, `/healthz`, and `/ws` from one loopback origin. The origin allowlist is limited to loopback hosts on the configured port.
+5. A real socket-level Rust test covers hello, initial snapshot, and live command delivery. `npm run build && npm run mock:fx` remains the browser-side reference fixture on loopback port 4174; its terminal accepts `wake`, `close`, `reset`, and `disconnect`.
 
-As of the manual Pi setup on 2026-10-10, Vite preview owns `127.0.0.1:8080`. Stop that preview before having `fx` bind 8080; verify process ownership first. The temporary kiosk user unit used during testing is not a boot-installed service. Do not assume an unattended-start setup already exists.
+Screen behavior is configured as flow nodes beside audio actions in the show TOML. Returning to sleeping/idle is always another explicit Cue flow (for example `show:reset`); `fx` does not invent a preset return timer.
+
+As of the manual Pi setup on 2026-10-10, `fx` owns `127.0.0.1:8080` and launches Chromium when the show enables `[kiosk]`. Vite is not part of the deployed runtime. This is running from tmux, not a boot-installed service, so unattended cold-boot startup remains deployment work.
 
 Use a persistent WebSocket that receives pushed commands, not a polling loop. Keep the animation entirely local: one `eye/wake` command runs the approved sequence without further network traffic. `fx` remains the sole serial reader and audio owner.
 
@@ -34,7 +36,7 @@ fx process ──> PipeWire audio
                        Chromium kiosk
 ```
 
-The two supervised processes are `fx` and Chromium. There is no Vite/Node process needed on the Pi if `fx` serves the static build. Serving the assets and WebSocket on the same origin also avoids a second browser endpoint to configure. Bind loopback only for the first deployment.
+With `kiosk.enabled = true`, one foreground `fx run --config ...` command starts the server, waits for it to listen, launches Chromium, records the kiosk PID, and stops Chromium when the show exits. `fx run --no-kiosk` plus `fx kiosk start|stop|restart|status` keeps separate-process debugging available. There is no Vite/Node process on the Pi. Serving the assets and WebSocket on the same origin also avoids a second browser endpoint to configure. Bind loopback only for the first deployment.
 
 If static hosting must stay separate, use a small production HTTP server on 8080 and the `fx` WebSocket on 8081, or reverse-proxy `/ws` through the static server. Keep the endpoint configurable. Do not run `vite dev` or `vite preview` as the production server; [Vite explicitly describes preview as local testing only](https://vite.dev/guide/static-deploy.html).
 
@@ -156,12 +158,12 @@ Connection phase (`disabled`, `connecting`, `syncing`, `connected`, `retrying`, 
 
 - [x] Implement and test the WebSocket source, bounded decoder, runtime config loader, and atomic snapshot action. Leave the approved animation unchanged.
 - [x] Verify browser → mock server handshake, server-triggered Wake, heartbeat, and snapshot recovery after disconnect. This does not substitute for real fx/audio or Pi boot testing.
-- [ ] Add `/`, `/config.json`, `/healthz`, and `/ws` to `fx`. Keep serial reading independent of browser connection status; losing the eye must not stop audio.
+- [x] Add `/`, `/config.json`, `/healthz`, and `/ws` to `fx`. Serial reading and audio dispatch are independent of browser connection status; losing the eye does not stop audio.
 - [ ] Run `fx` as the non-root user with the working PipeWire session. The current library invokes `wpctl`/`pw-play`, so a root system service will not automatically inherit that audio environment. Prefer a user service with the required audio/session dependencies; verify boot behavior on the actual Pi.
 - [ ] Launch Chromium kiosk through the actual graphical user's session, after the compositor and HTTP readiness. A plain boot-time system unit without a working display/session environment is insufficient. Determine the Pi OS release, compositor, username, and Chromium executable before writing/installing units.
-- [ ] Configure automatic restart, restart delay, and useful logs for `fx` and the kiosk. Account for systemd start-rate limits; test repeated failures, not just a single restart. [systemd's service documentation](https://manpages.debian.org/trixie/systemd/systemd.service.5.en.html) describes the relevant restart behavior.
-- [ ] Make the kiosk launcher wait/retry `/healthz` before first navigation. Dependency ordering alone does not prove HTTP readiness. If initial navigation fails, the launcher must retry it; the JS reconnect logic cannot help before the page loads.
-- [ ] Use a stable `/dev/serial/by-id/...` path and verify serial permissions plus unplug/replug recovery in `fx`.
+- [ ] Configure automatic boot/restart and restart delay for the unified runner. Runtime logs now append to `/tmp/fx-run.log` and Chromium logs to `/tmp/fx-kiosk.log`, but `/tmp` is not durable and no user service is installed yet. Account for systemd start-rate limits; test repeated failures, not just a single restart. [systemd's service documentation](https://manpages.debian.org/trixie/systemd/systemd.service.5.en.html) describes the relevant restart behavior.
+- [x] Wait for the configured HTTP listener before launching the kiosk, and fail clearly if Chromium exits immediately. The browser's WebSocket reconnect logic still handles readiness after the initial page load.
+- [ ] Use a stable `/dev/serial/by-id/...` path and verify serial permissions plus unplug/replug recovery on the Pi. `fx` now retains one serial owner and retries the configured stable path with bounded backoff.
 - [ ] Build on the laptop with the lockfile; deploy only `dist/` and runtime config for the frontend. Copy assets atomically or use release directories; serve config/index without long-lived caching and hashed assets with immutable caching. Keep a previous release available for rollback.
 - [ ] Test at the real display resolution, with screen blanking/power saving configured for the show, no missing external assets, and Wi-Fi disconnected. Do not assume desktop frame rate represents the Pi 4B.
 - [ ] Cold-boot unattended; kill/restart `fx`; kill/restart Chromium; unplug USB; interrupt networking during Wake; send duplicates, expired cues, malformed JSON, and sequence gaps. Verify no unintended Wake replay, no timer/socket leak, and correct snapshot recovery.

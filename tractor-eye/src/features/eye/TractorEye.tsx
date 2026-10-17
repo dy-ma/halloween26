@@ -8,10 +8,14 @@ import {
   type MotionValue,
 } from 'motion/react'
 import type { EyeState } from './eye-state'
+import type { DisplayCalibration } from '../../display/calibration'
 import './tractor-eye.css'
 
 interface TractorEyeProps {
   readonly state: EyeState
+  readonly mirrored?: boolean
+  readonly showGuide?: boolean
+  readonly calibration: DisplayCalibration
   readonly onReady?: () => void
 }
 
@@ -31,6 +35,11 @@ const tippingGlance = {
   y: ['0cqh', '0cqh', '-0.18cqh', '-0.18cqh', '0.12cqh', '0.12cqh', '0cqh', '0cqh'],
 }
 
+// Alert and tipping are the two phases of Wake. Together these scales make the
+// visible pupil about 2x its former Wake size and slightly larger than idle.
+const wakeIrisScale = 1.12
+const wakePupilScale = 1.04
+
 function WindshieldEye({
   state,
   aperture,
@@ -42,14 +51,16 @@ function WindshieldEye({
 }) {
   // Keep the textured lid shapes fixed so blinking only moves cached layers.
   // 18% closed overlap covers both fixed corner curves (8% + 7%) with margin.
-  const upperY = useTransform(aperture, [0, 1], ['-38%', '-94%'])
+  // Idle keeps a heavy, sleepy upper lid. Alert/tipping can still pull it
+  // completely clear, so the lid position remains part of the expression.
+  const upperY = useTransform(aperture, [0, 0.86, 1], ['-38%', '-78%', '-94%'])
   const lowerY = useTransform(aperture, [0, 1], ['44%', '98%'])
   const tipping = state.mode === 'tipping'
   const startled = state.mode === 'alert' || tipping
   const idle = state.isOpen && !reducedMotion
     && (startled || (state.gaze.x === 0 && state.gaze.y === 0))
   // A backward glance reveals more iris; looking forward turns it side-on again.
-  const irisAngle = 68 + state.gaze.x * 20
+  const irisAngle = 50 + state.gaze.x * 16
 
   return (
     <div className="windshield-eye">
@@ -71,13 +82,13 @@ function WindshieldEye({
             <motion.div
               className="eye-iris"
               initial={false}
-              animate={{ transform: `perspective(450px) rotateY(${irisAngle}deg) scale(${startled ? 0.88 : 1})` }}
+              animate={{ transform: `perspective(450px) rotateY(${irisAngle}deg) scale(${startled ? wakeIrisScale : 1})` }}
               transition={{ duration: reducedMotion || state.instantPose ? 0 : 0.16, ease: 'easeOut' }}
             >
               <motion.div
                 className="eye-pupil"
                 initial={false}
-                animate={{ scale: startled ? 0.66 : 1 }}
+                animate={{ scale: startled ? wakePupilScale : 1 }}
                 transition={{ duration: reducedMotion || state.instantPose ? 0 : 0.16 }}
               />
               <div className="eye-catchlight" />
@@ -93,12 +104,14 @@ function WindshieldEye({
   )
 }
 
-export function TractorEye({ state, onReady }: TractorEyeProps) {
+export function TractorEye({ state, mirrored = false, showGuide = true, calibration, onReady }: TractorEyeProps) {
   const aperture = useMotionValue(0)
   const reducedMotion = Boolean(useReducedMotion())
   const lastBlink = useRef(state.blinkSequence)
 
   useEffect(() => { onReady?.() }, [onReady])
+
+  const calibratedTransform = `translate(${calibration.xPx}px, ${calibration.yPx}px) rotate(${calibration.rotationDeg}deg) scale(${calibration.scaleX}, ${calibration.scaleY})`
 
   useLayoutEffect(() => {
     const newBlink = state.blinkSequence !== lastBlink.current
@@ -143,11 +156,23 @@ export function TractorEye({ state, onReady }: TractorEyeProps) {
   }, [aperture, reducedMotion, state.isOpen, state.mode, state.blinkSequence, state.transitionDurationMs, state.instantPose, state.snapshotRevision])
 
   return (
-    <div className={`eye-scene eye-scene--${state.mode}`}>
-      <div className="tractor-windshield" role="img" aria-label={`Right-facing tractor eye, ${state.mode}`}>
-        <div className="tractor-brow" />
-        {/* Recovery remounts motion tracks even if a snapshot matches an in-flight target. */}
-        <WindshieldEye key={state.snapshotRevision} state={state} aperture={aperture} reducedMotion={reducedMotion} />
+    <div className={`eye-scene eye-scene--${state.mode}${mirrored ? ' eye-scene--mirrored' : ''}`}>
+      <div
+        className="eye-calibrated-frame"
+        style={{ transform: calibratedTransform }}
+      >
+        {showGuide && <div className="eye-mounting-aperture" aria-hidden="true" />}
+        <div className="eye-visual-frame">
+          <div
+            className="tractor-windshield"
+            role="img"
+            aria-label={`${mirrored ? 'Left' : 'Right'}-facing tractor eye, ${state.mode}`}
+          >
+            <div className="tractor-brow" />
+            {/* Recovery remounts motion tracks even if a snapshot matches an in-flight target. */}
+            <WindshieldEye key={state.snapshotRevision} state={state} aperture={aperture} reducedMotion={reducedMotion} />
+          </div>
+        </div>
       </div>
     </div>
   )

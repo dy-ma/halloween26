@@ -1,0 +1,60 @@
+version = 2
+name = "tractor-usb"
+
+[playback]
+max_active = 16
+dedupe_capacity = 4096
+
+[links.radio]
+type = "serial-cue"
+baud = 115200
+
+[sources.radio]
+type = "cue-link"
+link = "radio"
+
+[assets.tractor_tip]
+type = "audio"
+file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
+
+[sinks.main_speaker]
+type = "audio"
+device = "jbl-usb"
+volume = 0.70
+
+[sinks.tractor_eye]
+type = "screen"
+screen_id = "tractor-eye"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[sinks.radio]
+type = "cue"
+link = "radio"
+
+[server]
+bind = "127.0.0.1:8080"
+static_dir = "/home/dyma/tractor-eye/dist"
+screen_id = "tractor-eye"
+
+[kiosk]
+enabled = true
+url = "http://127.0.0.1:8080/"
+
+[flows.tractor_tip]
+trigger = { source = "radio", cue = "tractor:tipped" }
+
+[[flows.tractor_tip.nodes]]
+id = "sound"
+action = { type = "audio.play", sink = "main_speaker", asset = "tractor_tip" }
+
+[[flows.tractor_tip.nodes]]
+id = "wake-eye"
+at_ms = 750
+action = { type = "screen.command", sink = "tractor_eye", command = { type = "eye/wake" }, final_state = { mode = "tipping", gaze = { x = -0.25, y = -0.65 } } }
+
+[flows.reset]
+trigger = { source = "radio", cue = "show:reset" }
+
+[[flows.reset.nodes]]
+id = "reset-eye"
+action = { type = "screen.command", sink = "tractor_eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }

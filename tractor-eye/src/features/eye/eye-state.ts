@@ -52,7 +52,14 @@ export function reduceEyeCommand(
   }
   switch (command.type) {
     case 'eye/wake':
-      return { ...createInitialEyeState(), snapshotRevision: state.snapshotRevision, transitionDurationMs: 120 }
+      // Wake always launches from a visibly closed pose, even when it interrupts
+      // a previous open/tipping state. The scheduled Open cue then animates out.
+      return {
+        ...createInitialEyeState(),
+        snapshotRevision: state.snapshotRevision,
+        transitionDurationMs: 0,
+        instantPose: true,
+      }
 
     case 'eye/open':
       return {

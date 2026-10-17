@@ -24,6 +24,9 @@ export const keyboardCommandSource: AnimationCommandSource = {
   start(commandBus) {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
+      // Modified keys are reserved for display calibration and must not also
+      // move the animated gaze or reset the show state.
+      if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
       if (event.target instanceof HTMLElement) {
         if (event.target.isContentEditable || event.target.closest('input, textarea, select')) return
         // Do not intercept native keyboard activation if controls are added.

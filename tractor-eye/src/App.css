@@ -7,3 +7,31 @@
   background: #050606;
 }
 
+.eye-diagnostics {
+  position: absolute;
+  z-index: 10;
+  top: 24px;
+  left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 23vw;
+  max-width: 250px;
+  color: #d9b96b;
+  font: 500 clamp(10px, 1.2vw, 16px) / 1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  opacity: 0.72;
+  text-shadow: 0 1px 2px #000;
+}
+
+.eye-diagnostics strong {
+  color: #ffe39a;
+  font-size: 1.08em;
+}
+
+.eye-diagnostics small {
+  margin-top: 5px;
+  color: #a68c52;
+  font-size: 0.86em;
+}
+
