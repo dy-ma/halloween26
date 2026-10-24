@@ -12,6 +12,9 @@ int main() {
   assert(original.source == 0x112233445566ULL);
   assert(original.destination == 0x887766554433ULL);
   assert(original.id == 0xaabbccdd00000001ULL);
+  original.execute_at_ms = 1800000000123ULL;
+  original.expires_after_ms = 2000;
+  original.generation = 7;
 
   uint8_t bytes[cue::kWireSize];
   assert(cue::encode(cue::makeCuePacket(original), bytes, sizeof(bytes)));
@@ -23,6 +26,9 @@ int main() {
   assert(decoded.message.source == original.source);
   assert(decoded.message.destination == original.destination);
   assert(decoded.message.id == original.id);
+  assert(decoded.message.execute_at_ms == original.execute_at_ms);
+  assert(decoded.message.expires_after_ms == original.expires_after_ms);
+  assert(decoded.message.generation == original.generation);
   assert(strcmp(decoded.message.name, original.name) == 0);
 
   cue::Node receiver;
@@ -54,6 +60,17 @@ int main() {
   assert(cue::decode(bytes, sizeof(bytes), decoded));
   assert(decoded.kind == cue::PacketKind::HELLO);
   assert(strcmp(decoded.message.name, "dc-motor") == 0);
+
+  const cue::Packet clock = cue::makeClockPacket(
+    0x112233445566ULL,
+    1800000000456ULL,
+    99
+  );
+  assert(cue::encode(clock, bytes, sizeof(bytes)));
+  assert(cue::decode(bytes, sizeof(bytes), decoded));
+  assert(decoded.kind == cue::PacketKind::CLOCK);
+  assert(decoded.message.execute_at_ms == 1800000000456ULL);
+  assert(decoded.message.id == 99);
 
   cue::DuplicateCache<2> cache;
   assert(!cache.contains(1, 1));

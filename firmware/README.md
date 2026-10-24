@@ -6,10 +6,12 @@ onto individual prop controllers. A cue is a small command-like event such as
 
 ## Reliability model
 
-Cue v2 uses addressed ESP-NOW unicast rather than repeated broadcast packets.
-Every cue has a source, destination, session-scoped ID, and name. The transport:
+Cue v3 uses addressed packets rather than repeated broadcast commands. Every
+cue has a source, destination, session-scoped ID, name, optional absolute
+execution time, validity window, and controller cancellation generation. The
+transport:
 
-1. sends the cue immediately;
+1. sends the cue immediately, even when its execution time is in the future;
 2. waits for an application-level ACK from the destination;
 3. retries the same ID with bounded exponential backoff if the ACK is lost;
 4. reports either `DELIVERED` or `TIMED_OUT` to the sender; and
@@ -20,8 +22,9 @@ attempt, then 140 ms, then at most 240 ms between subsequent attempts, with a
 small random jitter. A healthy link therefore remains nearly immediate, while a
 temporarily obstructed link gets roughly one second to recover.
 
-An ACK means the destination accepted the cue into its application queue. A
-physical controller that needs to confirm an action finished should still send
+An ACK means the destination accepted the cue into its immediate or scheduled
+application queue. A physical controller that needs to confirm an action
+finished should still send
 a separate completion/failure result. Motor limit switches, watchdogs, and
 local fail-safe behavior remain the controller's responsibility.
 
@@ -46,8 +49,15 @@ immediate local effect such as the horn while waiting for remote props: play
 the horn locally, dispatch the other cues, and report any remote timeout.
 
 This avoids an all-or-nothing distributed barrier in the latency-sensitive
-path. Tighter choreography can later add a scene/correlation ID and a future
-execution timestamp without changing the ACK/retry mechanism.
+path. MQTT controllers receive the coordinator clock once per second. They
+accept at most 16 future cues, reject scheduling without a fresh clock, and
+release each cue to application firmware at its absolute execution time. A
+command carrying a newer cancellation generation clears older scheduled and
+not-yet-consumed work before it is accepted. Scheduled work is limited to 60
+seconds ahead. ESP-NOW and serial-gateway commands currently execute on
+receipt; `fx` only pre-dispatches when the configured sink uses MQTT.
+Cue v3 changes the common binary packet size, so every participant on a Cue
+transport must run v3 firmware before that transport is used.
 
 Peer discovery HELLO packets carry the board's service name when one is set in
 `EspNowTransport::Config`. Applications can enumerate the discovered node ID,

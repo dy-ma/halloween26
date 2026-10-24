@@ -80,9 +80,13 @@ catalog, per-voice playback/Stop, Bluetooth readiness, and DAG mixing.
 
 ## Dependency graphs
 
-Existing `at_ms` nodes still run independently at offsets from the trigger.
-Add `after = ["node-id", ...]` to wait for all named nodes in that flow to
-complete. With `after`, `at_ms` is an additional delay after the dependencies.
+Root `at_ms` nodes use offsets from the trigger. For MQTT assemblies, `fx`
+immediately transmits those nodes with an absolute execution time; the board
+queues them and begins locally at that time. Local audio/screens and legacy
+serial or ESP-NOW paths still wait in `fx`. Add `after = ["node-id", ...]` to
+wait for all named nodes in that flow to complete. With `after`, `at_ms` is an
+additional delay after the dependencies; `fx` transmits the child as soon as
+the dependencies finish and converts that delay to a new execution timestamp.
 Unknown edges, duplicates, self-dependencies, and cycles are rejected.
 
 For example, inside a flow whose sinks/assets are already configured:
@@ -119,9 +123,28 @@ fire-and-forget behavior. Set `wait_for` to opt into assembly completion.
 `timeout_ms` defaults to 10000, with a maximum of 600000. Failures/timeouts
 skip dependent nodes; independent branches continue. No automatic rollback
 or motor reversal is attempted. STOP ALL (`stop_all` control or `show:stop`
-event) cancels pending nodes of previous runs and sends its configured stop
-actions. It also stops active FX-managed audio; stopped audio nodes fail rather
-than release their dependencies as if playback had finished normally.
+event) advances the controller generation, cancels pending nodes of previous
+runs, and sends its configured stop actions. MQTT boards discard queued work
+from older generations before accepting the stop. It also stops active
+FX-managed audio; stopped audio nodes fail rather than release their
+dependencies as if playback had finished normally.
+
+## Prop and controller state
+
+Optional `[props.*]` sections define named prop states and allowed transitions.
+A node opts into one with `transition = "prop.transition"`. Scheduling reserves
+the transition but leaves the observed state unchanged; the prop enters its
+active state at the execution time and reaches its destination state only after
+the action completes successfully. Failure selects the transition's configured
+failure state.
+
+Flows use `role = "show"`, `"reset"`, `"stop"`, or the default `"utility"`.
+Stateful shows are accepted only from `Ready`. A completed show becomes
+`Needs reset`; stop becomes `Halted`; a successful reset becomes `Ready` only
+when every prop is in its configured ready state. Direct board-motion controls
+invalidate position assumptions and require another reset. The complete state
+snapshot, including pending transitions and their execution times, is available
+through `/api/status` for the future graph UI.
 
 The dashboard has a fixed-height scrolling activity log of the latest 500
 events: workflow starts, action state changes, completion/failure details,
@@ -133,7 +156,9 @@ workflows do not survive an `fx` restart.
 
 ## Assembly return status and correlation
 
-The Cue v2 wire format is unchanged. Each returned status has its own event
+Cue v3 keeps the 31-byte cue-name capacity and adds execution time, validity,
+and cancellation fields. All MQTT participants must be upgraded together.
+Each returned status has its own event
 ID for reliable delivery/deduplication. The status name carries the original
 command's ID as a 16-digit hexadecimal suffix:
 

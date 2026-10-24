@@ -255,13 +255,22 @@ url = "http://127.0.0.1:8080/"
 
 ```
 
-Every node in a matching flow starts independently at `at_ms` relative to its
-trigger. The example mixes two sounds on `front`, sends a delayed sound to
-`rear`, wakes the eye, and finally broadcasts `tractor:stepper:stroke`. Cue
+Every root node in a matching flow targets `at_ms` relative to its trigger.
+MQTT cues are transmitted immediately with that absolute execution time, while
+local actions and legacy links wait in `fx`. A node with `after` is dispatched
+only after its dependencies complete, with `at_ms` then interpreted as a delay
+from that completion. The example mixes two sounds on `front`, sends a delayed
+sound to `rear`, wakes the eye, and finally cues `tractor:stepper:stroke`. Cue
 emission is bounded and expires rather than replaying stale motion after a link
 reconnect. Repeating the trigger with a new Cue ID starts another flow instance;
 exact retransmissions remain deduplicated. Eye state returns only in response to
 the separate `show:reset` flow.
+
+Shows may also define `[props.*]` state graphs and mark flows with `role =
+"show"`, `"reset"`, or `"stop"`. Nodes bind physical work to a transition with
+`transition = "prop.transition"`. The controller then gates show requests,
+tracks scheduled and active transitions, and exposes the complete state through
+`/api/status`.
 
 When `[server]` is present, `fx run` also serves the built eye app, runtime
 configuration, health endpoint, and WebSocket from one loopback origin:

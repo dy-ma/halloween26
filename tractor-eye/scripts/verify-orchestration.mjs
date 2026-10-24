@@ -29,10 +29,10 @@ async function read(path) {
 
 function packet(kind, id, name = '') {
   assert.ok(Buffer.byteLength(name) <= 31)
-  const bytes = Buffer.alloc(64)
-  bytes.write('CUE2'); bytes[4] = 2; bytes[5] = kind
+  const bytes = Buffer.alloc(80)
+  bytes.write('CUE3'); bytes[4] = 3; bytes[5] = kind
   bytes.writeBigUInt64LE(node, 8); bytes.writeBigUInt64LE(coordinator, 16)
-  bytes.writeBigUInt64LE(id, 24); bytes.write(name, 32)
+  bytes.writeBigUInt64LE(id, 24); bytes.write(name, 48)
   return bytes
 }
 
@@ -76,7 +76,7 @@ try {
     subscription.stderr.on('data', raw => reject(new Error(String(raw))))
     lines.on('line', hex => {
       const bytes = Buffer.from(hex.trim(), 'hex')
-      if (bytes.length === 64 && bytes[5] === 1) resolve(bytes)
+      if (bytes.length === 80 && bytes[5] === 1) resolve(bytes)
     })
   }))
   const response = await fetch(new URL('/api/control', base), {

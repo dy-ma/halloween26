@@ -158,6 +158,12 @@ bool MqttTransport::ensureConnected(uint32_t now_ms) {
     mqtt_client_.stop();
     return false;
   }
+  char clock_topic[128] = {};
+  snprintf(clock_topic, sizeof(clock_topic), "%s/clock", config_.topic_prefix);
+  if (!mqtt_client_.subscribe(clock_topic, 0)) {
+    mqtt_client_.stop();
+    return false;
+  }
   next_presence_at_ = now_ms;
   return true;
 }
@@ -259,10 +265,14 @@ void MqttTransport::processIncoming(uint32_t now_ms) {
   size_t handled = 0;
   while (handled++ < 8 && xQueueReceive(raw_queue_, &raw, 0) == pdTRUE) {
     Packet packet = {};
-    if (!decode(raw.bytes, raw.length, packet) ||
-        packet.message.destination != local_node_) {
+    if (!decode(raw.bytes, raw.length, packet)) {
       continue;
     }
+    if (packet.kind == PacketKind::CLOCK) {
+      observeClock(packet, now_ms);
+      continue;
+    }
+    if (packet.message.destination != local_node_) continue;
     if (packet.kind == PacketKind::ACK) {
       for (SendSlot &slot : send_slots_) {
         if (slot.active && slot.message.destination == packet.message.source &&
@@ -278,12 +288,82 @@ void MqttTransport::processIncoming(uint32_t now_ms) {
       queueAck(packet);
       continue;
     }
-    ReceivedCue received = {};
-    received.message = packet.message;
-    if (xQueueSend(cue_queue_, &received, 0) == pdTRUE) {
+    if (!acceptGeneration(packet.message)) {
+      // Never acknowledge stale work as delivered. The current controller can
+      // retry with a newer generation; an obsolete sender will expire safely.
+      continue;
+    }
+    if (scheduleCue(packet.message, now_ms)) {
       received_ids_.remember(packet.message.source, packet.message.id);
       queueAck(packet);
     }
+  }
+}
+
+void MqttTransport::observeClock(const Packet &packet, uint32_t now_ms) {
+  clock_epoch_ms_ = packet.message.execute_at_ms;
+  clock_local_ms_ = now_ms;
+  last_clock_at_ = now_ms;
+  clock_ready_ = true;
+}
+
+bool MqttTransport::clockFresh(uint32_t now_ms) const {
+  return clock_ready_ && now_ms - last_clock_at_ <= kClockFreshMs;
+}
+
+uint64_t MqttTransport::clockNow(uint32_t now_ms) const {
+  return clock_epoch_ms_ + static_cast<uint32_t>(now_ms - clock_local_ms_);
+}
+
+void MqttTransport::clearScheduled() {
+  for (ScheduleSlot &slot : schedule_slots_) slot.active = false;
+  xQueueReset(cue_queue_);
+}
+
+bool MqttTransport::acceptGeneration(const Message &message) {
+  if (message.generation == 0) return true;
+  if (generation_ == 0 || static_cast<int32_t>(message.generation - generation_) > 0) {
+    generation_ = message.generation;
+    clearScheduled();
+    return true;
+  }
+  return message.generation == generation_;
+}
+
+bool MqttTransport::scheduleCue(const Message &message, uint32_t now_ms) {
+  if (message.execute_at_ms == 0) {
+    ReceivedCue received = {};
+    received.message = message;
+    return xQueueSend(cue_queue_, &received, 0) == pdTRUE;
+  }
+  if (!clockFresh(now_ms)) return false;
+  const uint64_t now_epoch_ms = clockNow(now_ms);
+  const uint64_t deadline = message.execute_at_ms + message.expires_after_ms;
+  if (deadline < message.execute_at_ms || now_epoch_ms > deadline) return true;
+  if (message.execute_at_ms > now_epoch_ms + kMaxScheduleAheadMs) return true;
+  for (ScheduleSlot &slot : schedule_slots_) {
+    if (slot.active) continue;
+    slot.active = true;
+    slot.message = message;
+    return true;
+  }
+  return false;
+}
+
+void MqttTransport::releaseDueCues(uint32_t now_ms) {
+  if (!clock_ready_) return;
+  const uint64_t now_epoch_ms = clockNow(now_ms);
+  for (ScheduleSlot &slot : schedule_slots_) {
+    if (!slot.active) continue;
+    const uint64_t deadline = slot.message.execute_at_ms + slot.message.expires_after_ms;
+    if (deadline < slot.message.execute_at_ms || now_epoch_ms > deadline) {
+      slot.active = false;
+      continue;
+    }
+    if (now_epoch_ms < slot.message.execute_at_ms) continue;
+    ReceivedCue received = {};
+    received.message = slot.message;
+    if (xQueueSend(cue_queue_, &received, 0) == pdTRUE) slot.active = false;
   }
 }
 
@@ -346,6 +426,7 @@ void MqttTransport::run() {
     if (connected) mqtt_client_.poll();
     acceptOutgoing();
     processIncoming(now);
+    releaseDueCues(now);
     sendOneAck();
     sendDueCues(now);
     if (connected && due(now, next_presence_at_)) {

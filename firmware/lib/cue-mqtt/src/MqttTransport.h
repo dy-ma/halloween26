@@ -66,6 +66,9 @@ class MqttTransport final : public Transport {
   static constexpr size_t kDeliveryQueueCapacity = 16;
   static constexpr size_t kSendCapacity = 8;
   static constexpr size_t kAckCapacity = 8;
+  static constexpr size_t kScheduleCapacity = 16;
+  static constexpr uint32_t kClockFreshMs = 5000;
+  static constexpr uint64_t kMaxScheduleAheadMs = 60000;
 
   struct Outgoing {
     Message message;
@@ -92,6 +95,11 @@ class MqttTransport final : public Transport {
     uint8_t bytes[kWireSize] = {};
   };
 
+  struct ScheduleSlot {
+    bool active = false;
+    Message message;
+  };
+
   static MqttTransport *active_instance_;
   static void taskEntry(void *context);
   static void onMessage(int message_size);
@@ -104,6 +112,13 @@ class MqttTransport final : public Transport {
   bool publishPresence();
   void acceptOutgoing();
   void processIncoming(uint32_t now_ms);
+  void releaseDueCues(uint32_t now_ms);
+  void clearScheduled();
+  bool acceptGeneration(const Message &message);
+  bool scheduleCue(const Message &message, uint32_t now_ms);
+  void observeClock(const Packet &packet, uint32_t now_ms);
+  bool clockFresh(uint32_t now_ms) const;
+  uint64_t clockNow(uint32_t now_ms) const;
   void sendOneAck();
   void sendDueCues(uint32_t now_ms);
   void complete(
@@ -124,11 +139,17 @@ class MqttTransport final : public Transport {
   QueueHandle_t delivery_queue_ = nullptr;
   SendSlot send_slots_[kSendCapacity] = {};
   AckSlot ack_slots_[kAckCapacity] = {};
+  ScheduleSlot schedule_slots_[kScheduleCapacity] = {};
   DuplicateCache<64> received_ids_;
   uint64_t local_node_ = 0;
   uint32_t next_wifi_attempt_at_ = 0;
   uint32_t next_mqtt_attempt_at_ = 0;
   uint32_t next_presence_at_ = 0;
+  uint64_t clock_epoch_ms_ = 0;
+  uint32_t clock_local_ms_ = 0;
+  uint32_t last_clock_at_ = 0;
+  uint32_t generation_ = 0;
+  bool clock_ready_ = false;
   bool configured_ = false;
   bool ready_ = false;
 };

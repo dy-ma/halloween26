@@ -25,8 +25,10 @@ when it shares the broker host, but never for a remote board.
   `020000000001` in the checked-in profile.
 - Each board subscribes only to `halloween/cue/<its-node-id>` and publishes its
   one-second presence heartbeat to `halloween/presence/<its-node-id>`.
-- Cue v2 binary packets, application ACKs, duplicate suppression, bounded
-  retries, and expiring dashboard actions are preserved over MQTT.
+- Cue v3 binary packets, application ACKs, duplicate suppression, bounded
+  retries, and expiring dashboard actions are preserved over MQTT. V3 adds
+  absolute execution timestamps, validity windows, controller generations,
+  and a coordinator clock packet.
 - MQTT socket work runs on a separate ESP32 task. Broker or Wi-Fi delays cannot
   block the motor loop, lease expiry, step pulse generation, or local stop.
 - The MQTT profile does not use `sync-gateway`; that spare XIAO is still needed

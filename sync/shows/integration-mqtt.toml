@@ -52,6 +52,54 @@ type = "cue"
 link = "radio"
 target = "9070690BE79C"
 
+[props.lift_a]
+label = "Lift A"
+initial = "unknown"
+ready = "low"
+states = ["unknown", "homing-down", "low", "raising", "high", "halted", "fault"]
+
+[props.lift_a.transitions.home]
+from = ["unknown", "low", "high", "halted", "fault"]
+active = "homing-down"
+to = "low"
+failure = "fault"
+
+[props.lift_a.transitions.raise]
+from = ["low"]
+active = "raising"
+to = "high"
+failure = "fault"
+
+[props.lift_b]
+label = "Lift B"
+initial = "unknown"
+ready = "low"
+states = ["unknown", "homing-down", "low", "raising", "high", "halted", "fault"]
+
+[props.lift_b.transitions.home]
+from = ["unknown", "low", "high", "halted", "fault"]
+active = "homing-down"
+to = "low"
+failure = "fault"
+
+[props.lift_b.transitions.raise]
+from = ["low"]
+active = "raising"
+to = "high"
+failure = "fault"
+
+[props.smokestack]
+label = "Smokestack"
+initial = "idle"
+ready = "idle"
+states = ["idle", "stroking", "halted", "fault"]
+
+[props.smokestack.transitions.stroke]
+from = ["idle"]
+active = "stroking"
+to = "idle"
+failure = "fault"
+
 [server]
 bind = "0.0.0.0:8080"
 static_dir = "../../tractor-eye/dist"
@@ -63,6 +111,7 @@ url = "http://127.0.0.1:8080/?screen=tractor-eye&name=Pi-eye&client=pi-eye"
 
 [flows.integration]
 trigger = { source = "remote", cue = "show:start" }
+role = "show"
 
 [[flows.integration.nodes]]
 id = "wake-eye"
@@ -71,18 +120,37 @@ action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" 
 [[flows.integration.nodes]]
 id = "dc-a-pulse"
 at_ms = 500
-action = { type = "cue.emit", sink = "dc_a", cue = "dc:fwd:70:500" }
+transition = "lift_a.raise"
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:fwd:70:500", wait_for = "dc:complete", timeout_ms = 2500 }
 
 [[flows.integration.nodes]]
 id = "dc-b-pulse"
 at_ms = 750
-action = { type = "cue.emit", sink = "dc_b", cue = "dc:rev:70:500" }
+transition = "lift_b.raise"
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:rev:70:500", wait_for = "dc:complete", timeout_ms = 2500 }
 
 [[flows.integration.nodes]]
 id = "stepper-turn"
 at_ms = 1000
 # Hardware-timed S-curve: 60 RPM peak, acceleration/deceleration from/to rest.
-action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60" }
+transition = "smokestack.stroke"
+action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60", wait_for = "step:complete", timeout_ms = 4000 }
+
+[flows.reset]
+trigger = { source = "remote", cue = "show:reset" }
+role = "reset"
+
+# The two lifts are mounted in opposite orientations: A lowers in reverse and
+# B lowers forward. Each command ends locally at its lower limit switch.
+[[flows.reset.nodes]]
+id = "home-lift-a"
+transition = "lift_a.home"
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:rev:90:20000", wait_for = "dc:limit:rev", timeout_ms = 22000 }
+
+[[flows.reset.nodes]]
+id = "home-lift-b"
+transition = "lift_b.home"
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:fwd:90:20000", wait_for = "dc:limit:fwd", timeout_ms = 22000 }
 
 [flows.bench_audio]
 trigger = { source = "remote", cue = "bench:audio" }
@@ -107,6 +175,7 @@ action = { type = "screen.command", sink = "eye", command = { type = "system/res
 
 [flows.stop_all]
 trigger = { source = "remote", cue = "show:stop" }
+role = "stop"
 
 [[flows.stop_all.nodes]]
 id = "stop-dc-a"
@@ -133,6 +202,13 @@ flow = "integration"
 type = "flow"
 label = "STOP ALL"
 flow = "stop_all"
+
+[controls.reset_show]
+type = "flow"
+label = "Reset and home lifts"
+flow = "reset"
+panel = "show"
+section = "show"
 
 [controls.audio_test]
 type = "flow"

@@ -5,10 +5,10 @@
 namespace cue {
 namespace {
 
-constexpr uint8_t kMagic[] = {'C', 'U', 'E', '2'};
-constexpr uint8_t kVersion = 2;
+constexpr uint8_t kMagic[] = {'C', 'U', 'E', '3'};
+constexpr uint8_t kVersion = 3;
 constexpr uint8_t kHasReportedRssi = 1 << 0;
-constexpr size_t kNameOffset = 32;
+constexpr size_t kNameOffset = 48;
 
 void writeU64(uint8_t *output, uint64_t value) {
   for (size_t index = 0; index < 8; ++index) {
@@ -20,6 +20,20 @@ uint64_t readU64(const uint8_t *input) {
   uint64_t value = 0;
   for (size_t index = 0; index < 8; ++index) {
     value |= static_cast<uint64_t>(input[index]) << (index * 8);
+  }
+  return value;
+}
+
+void writeU32(uint8_t *output, uint32_t value) {
+  for (size_t index = 0; index < 4; ++index) {
+    output[index] = static_cast<uint8_t>(value >> (index * 8));
+  }
+}
+
+uint32_t readU32(const uint8_t *input) {
+  uint32_t value = 0;
+  for (size_t index = 0; index < 4; ++index) {
+    value |= static_cast<uint32_t>(input[index]) << (index * 8);
   }
   return value;
 }
@@ -50,6 +64,11 @@ bool isValidPacket(const Packet &packet) {
       return packet.message.destination == kBroadcastNode &&
         packet.message.id == 0 &&
         boundedLength(packet.message.name, kNameCapacity) < kNameCapacity;
+    case PacketKind::CLOCK:
+      return packet.message.destination == kBroadcastNode &&
+        packet.message.id != 0 && packet.message.execute_at_ms != 0 &&
+        packet.message.expires_after_ms == 0 &&
+        packet.message.generation == 0;
   }
   return false;
 }
@@ -79,6 +98,10 @@ bool isValid(const Message &message) {
   if (!isValidNode(message.source) || !isValidNode(message.destination) ||
       message.destination == kBroadcastNode ||
       message.source == message.destination || message.id == 0) {
+    return false;
+  }
+  if (message.execute_at_ms != 0 &&
+      (message.expires_after_ms == 0 || message.generation == 0)) {
     return false;
   }
   const size_t length = boundedLength(message.name, kNameCapacity);
@@ -120,6 +143,16 @@ Packet makeHelloPacket(uint64_t source, const char *service) {
   return packet;
 }
 
+Packet makeClockPacket(uint64_t source, uint64_t epoch_ms, uint64_t sequence) {
+  Packet packet = {};
+  packet.kind = PacketKind::CLOCK;
+  packet.message.source = source;
+  packet.message.destination = kBroadcastNode;
+  packet.message.id = sequence == 0 ? 1 : sequence;
+  packet.message.execute_at_ms = epoch_ms;
+  return packet;
+}
+
 bool encode(const Packet &packet, uint8_t *output, size_t output_size) {
   if (output == nullptr || output_size < kWireSize || !isValidPacket(packet)) {
     return false;
@@ -134,6 +167,9 @@ bool encode(const Packet &packet, uint8_t *output, size_t output_size) {
   writeU64(output + 8, packet.message.source);
   writeU64(output + 16, packet.message.destination);
   writeU64(output + 24, packet.message.id);
+  writeU64(output + 32, packet.message.execute_at_ms);
+  writeU32(output + 40, packet.message.expires_after_ms);
+  writeU32(output + 44, packet.message.generation);
   if (packet.kind == PacketKind::CUE || packet.kind == PacketKind::HELLO) {
     memcpy(output + kNameOffset, packet.message.name, sizeof(packet.message.name));
   }
@@ -153,6 +189,9 @@ bool decode(const uint8_t *input, size_t input_size, Packet &packet) {
   decoded.message.source = readU64(input + 8);
   decoded.message.destination = readU64(input + 16);
   decoded.message.id = readU64(input + 24);
+  decoded.message.execute_at_ms = readU64(input + 32);
+  decoded.message.expires_after_ms = readU32(input + 40);
+  decoded.message.generation = readU32(input + 44);
   if (decoded.kind == PacketKind::CUE || decoded.kind == PacketKind::HELLO) {
     memcpy(decoded.message.name, input + kNameOffset, sizeof(decoded.message.name));
   }

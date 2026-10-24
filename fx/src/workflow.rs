@@ -1,9 +1,18 @@
 //! Bounded run history and application status. Transport ACKs never enter this bus.
-use crate::{RuntimeNode, cue_link::EventMessage, screen::ScreenHub};
+use crate::{
+    RuntimeNode,
+    cue_link::EventMessage,
+    screen::ScreenHub,
+    show_config::FlowRole,
+    state::{StateHub, StateSnapshot, SystemMode},
+};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{Semaphore, broadcast, watch};
@@ -22,6 +31,7 @@ pub struct DeviceStatus {
 #[serde(rename_all = "lowercase")]
 pub enum Phase {
     Pending,
+    Scheduled,
     Running,
     Complete,
     Failed,
@@ -41,16 +51,19 @@ pub struct RunStatus {
     pub id: String,
     pub reason: String,
     pub started_at_ms: u64,
+    pub role: FlowRole,
     pub nodes: Vec<NodeStatus>,
 }
 
 struct RunRecord {
     status: RunStatus,
     cancelled: watch::Sender<bool>,
+    finished: bool,
 }
 
 #[derive(Serialize)]
 pub struct Snapshot {
+    pub state: StateSnapshot,
     pub devices: Vec<DeviceStatus>,
     pub runs: Vec<RunStatus>,
     pub log: Vec<LogEntry>,
@@ -94,11 +107,25 @@ pub struct WorkflowHub {
     inner: Arc<Mutex<Inner>>,
     events: broadcast::Sender<DeviceStatus>,
     audio: Arc<Mutex<Option<crate::audio_runtime::AudioRuntime>>>,
+    generation: Arc<AtomicU32>,
+    state: StateHub,
 }
 
 impl Default for WorkflowHub {
     fn default() -> Self {
+        Self::new(StateHub::default())
+    }
+}
+
+impl WorkflowHub {
+    pub fn new(state: StateHub) -> Self {
         let (events, _) = broadcast::channel(256);
+        // A wall-clock seed keeps a restarted controller newer than work a
+        // board may still remember from the previous process lifetime.
+        let generation = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as u32;
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 devices: BTreeMap::new(),
@@ -108,6 +135,8 @@ impl Default for WorkflowHub {
             })),
             events,
             audio: Arc::new(Mutex::new(None)),
+            generation: Arc::new(AtomicU32::new(generation.max(1))),
+            state,
         }
     }
 }
@@ -204,6 +233,7 @@ impl WorkflowHub {
     pub fn snapshot(&self) -> Snapshot {
         let inner = self.inner.lock().expect("workflow mutex");
         Snapshot {
+            state: self.state.snapshot(),
             devices: inner.devices.values().cloned().collect(),
             runs: inner.runs.iter().rev().map(|r| r.status.clone()).collect(),
             log: inner.log.iter().cloned().collect(),
@@ -211,19 +241,51 @@ impl WorkflowHub {
     }
 
     pub fn cancel_pending(&self) {
+        // Holding a jog button repeats its request. Once the managed system is
+        // already halted those repeats and the matching release/stop command
+        // stay in the same generation instead of consuming a new epoch each
+        // time.
+        if self.state.snapshot().mode != SystemMode::Halted {
+            let _ = self
+                .generation
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                    Some(value.wrapping_add(1).max(1))
+                });
+        }
         for run in &self.inner.lock().expect("workflow mutex").runs {
             let _ = run.cancelled.send(true);
         }
+        self.state.halt();
+    }
+
+    pub fn generation(&self) -> u32 {
+        self.generation.load(Ordering::Acquire)
     }
 
     fn update(&self, run: &str, node: &str, phase: Phase, detail: String) {
         let mut inner = self.inner.lock().expect("workflow mutex");
+        let mut finished = None;
         if let Some(record) = inner.runs.iter_mut().find(|r| r.status.id == run)
             && let Some(status) = record.status.nodes.iter_mut().find(|n| n.id == node)
         {
             status.phase = phase;
             status.detail = detail.clone();
             let reason = record.status.reason.clone();
+            if !record.finished
+                && record.status.nodes.iter().all(|node| {
+                    matches!(node.phase, Phase::Complete | Phase::Failed | Phase::Skipped)
+                })
+            {
+                record.finished = true;
+                finished = Some((
+                    record.status.role,
+                    record
+                        .status
+                        .nodes
+                        .iter()
+                        .all(|node| node.phase == Phase::Complete),
+                ));
+            }
             inner.log(
                 match phase {
                     Phase::Failed => "error",
@@ -234,11 +296,16 @@ impl WorkflowHub {
                 Some(run),
             );
         }
+        drop(inner);
+        if let Some((role, success)) = finished {
+            self.state.finish_flow(role, success);
+        }
     }
 
     pub fn start(
         &self,
         nodes: &[RuntimeNode],
+        role: FlowRole,
         screen: &ScreenHub,
         slots: Arc<Semaphore>,
         reason: &str,
@@ -255,19 +322,24 @@ impl WorkflowHub {
                 r.status
                     .nodes
                     .iter()
-                    .all(|n| !matches!(n.phase, Phase::Pending | Phase::Running))
+                    .all(|n| !matches!(n.phase, Phase::Pending | Phase::Scheduled | Phase::Running))
             }) {
                 inner.runs.remove(index);
             } else {
                 return Err("all 64 workflow slots are active".into());
             }
         }
+        self.state.begin_flow(role)?;
+        let started_at_ms = now_ms();
+        let generation = self.generation();
         inner.runs.push_back(RunRecord {
             cancelled,
+            finished: false,
             status: RunStatus {
                 id: id.clone(),
                 reason: reason.to_string(),
-                started_at_ms: now_ms(),
+                started_at_ms,
+                role,
                 nodes: nodes
                     .iter()
                     .map(|n| NodeStatus {
@@ -297,7 +369,9 @@ impl WorkflowHub {
             let slots = slots.clone();
             let run = id.clone();
             let mut cancelled = cancel_receiver.clone();
+            let transition = node.transition.clone();
             tokio::spawn(async move {
+                let has_dependencies = !dependencies.is_empty();
                 let ready = async {
                     for mut dependency in dependencies {
                         loop {
@@ -315,7 +389,6 @@ impl WorkflowHub {
                                 .map_err(|_| "dependency stopped".to_string())?;
                         }
                     }
-                    tokio::time::sleep(Duration::from_millis(node.at_ms)).await;
                     Ok(())
                 };
                 let ready = if *cancelled.borrow() {
@@ -341,13 +414,113 @@ impl WorkflowHub {
                     let _ = state.send(Phase::Skipped);
                     return;
                 }
-                hub.update(&run, &node.id, Phase::Running, "executing".into());
-                let _ = state.send(Phase::Running);
-                let result = crate::execute_node(node.clone(), &screen, slots, &hub).await;
+                let target_ms = if has_dependencies {
+                    now_ms().saturating_add(node.at_ms)
+                } else {
+                    started_at_ms.saturating_add(node.at_ms)
+                };
+                let remote_schedule = matches!(
+                    &node.action,
+                    crate::RuntimeAction::Cue {
+                        schedule_at_board: true,
+                        ..
+                    }
+                ) && target_ms > now_ms();
+                if let Some(transition) = &transition
+                    && let Err(error) = hub.state.reserve(
+                        transition,
+                        &run,
+                        &node.id,
+                        (target_ms > now_ms()).then_some(target_ms),
+                    )
+                {
+                    hub.update(&run, &node.id, Phase::Failed, error);
+                    let _ = state.send(Phase::Failed);
+                    return;
+                }
+                if !remote_schedule {
+                    let wait_ms = target_ms.saturating_sub(now_ms());
+                    if wait_ms != 0 {
+                        let delay = tokio::time::sleep(Duration::from_millis(wait_ms));
+                        tokio::pin!(delay);
+                        let delayed = tokio::select! {
+                            _ = &mut delay => true,
+                            _ = cancelled.changed() => false,
+                        };
+                        if !delayed || *cancelled.borrow() {
+                            hub.update(
+                                &run,
+                                &node.id,
+                                Phase::Skipped,
+                                "cancelled before execution".into(),
+                            );
+                            let _ = state.send(Phase::Skipped);
+                            return;
+                        }
+                    }
+                    hub.update(&run, &node.id, Phase::Running, "executing".into());
+                    let _ = state.send(Phase::Running);
+                    if let Some(transition) = &transition {
+                        hub.state.begin_transition(transition, &run, &node.id);
+                    }
+                } else {
+                    hub.update(
+                        &run,
+                        &node.id,
+                        Phase::Scheduled,
+                        format!("accepted for execution at {target_ms}"),
+                    );
+                    let _ = state.send(Phase::Scheduled);
+                }
+                let execution = crate::execute_node(
+                    node.clone(),
+                    &screen,
+                    slots,
+                    &hub,
+                    remote_schedule.then_some(target_ms),
+                    generation,
+                );
+                tokio::pin!(execution);
+                let result = if remote_schedule {
+                    let start = tokio::time::sleep(Duration::from_millis(
+                        target_ms.saturating_sub(now_ms()),
+                    ));
+                    tokio::pin!(start);
+                    tokio::select! {
+                        result = &mut execution => result,
+                        _ = &mut start => {
+                            hub.update(&run, &node.id, Phase::Running, "scheduled execution time reached".into());
+                            let _ = state.send(Phase::Running);
+                            if let Some(transition) = &transition {
+                                hub.state.begin_transition(transition, &run, &node.id);
+                            }
+                            tokio::select! {
+                                result = &mut execution => result,
+                                _ = cancelled.changed() => Err("cancelled during execution".into()),
+                            }
+                        }
+                        _ = cancelled.changed() => Err("cancelled before execution".into()),
+                    }
+                } else {
+                    tokio::select! {
+                        result = &mut execution => result,
+                        _ = cancelled.changed() => Err("cancelled during execution".into()),
+                    }
+                };
                 let (phase, detail) = match result {
                     Ok(detail) => (Phase::Complete, detail),
+                    Err(error) if error.starts_with("cancelled ") => (Phase::Skipped, error),
                     Err(error) => (Phase::Failed, error),
                 };
+                if let Some(transition) = &transition {
+                    match phase {
+                        Phase::Complete => {
+                            hub.state.complete_transition(transition, &run, &node.id)
+                        }
+                        Phase::Failed => hub.state.fail_transition(transition, &run, &node.id),
+                        _ => {}
+                    }
+                }
                 crate::fx_log!("run {run} node {}: {phase:?}: {detail}", node.id);
                 hub.update(&run, &node.id, phase, detail);
                 let _ = state.send(phase);
@@ -485,12 +658,14 @@ mod tests {
             id: id.into(),
             at_ms: 0,
             after: after.iter().map(|s| s.to_string()).collect(),
+            transition: None,
             action: crate::RuntimeAction::Cue {
                 sink: "motor".into(),
                 link: "radio".into(),
                 sender,
                 target: "AABBCCDDEEFF".into(),
                 cue: "dc:fwd:70:100".into(),
+                schedule_at_board: true,
                 expires_after_ms: 500,
                 wait_for: wait.then(|| "dc:complete".into()),
                 timeout_ms: 100,
@@ -525,8 +700,14 @@ mod tests {
             cue_node("move", &[], sender.clone(), true),
             cue_node("sound", &["move"], sender, false),
         ];
-        hub.start(&nodes, &screens(), Arc::new(Semaphore::new(1)), "test")
-            .unwrap();
+        hub.start(
+            &nodes,
+            FlowRole::Utility,
+            &screens(),
+            Arc::new(Semaphore::new(1)),
+            "test",
+        )
+        .unwrap();
         let first = next_outgoing(&rx).await;
         let event = |id| EventMessage {
             link: Some("radio".into()),
@@ -556,8 +737,14 @@ mod tests {
             cue_node("child", &["move"], sender.clone(), false),
             cue_node("independent", &[], sender, false),
         ];
-        hub.start(&nodes, &screens(), Arc::new(Semaphore::new(1)), "test")
-            .unwrap();
+        hub.start(
+            &nodes,
+            FlowRole::Utility,
+            &screens(),
+            Arc::new(Semaphore::new(1)),
+            "test",
+        )
+        .unwrap();
         let _ = next_outgoing(&rx).await;
         let _ = next_outgoing(&rx).await;
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -580,8 +767,20 @@ mod tests {
         let (sender, rx) = crate::cue_link::CueLinkSender::channel(8);
         let mut node = cue_node("delayed", &[], sender, false);
         node.at_ms = 10_000;
-        hub.start(&[node], &screens(), Arc::new(Semaphore::new(1)), "test")
-            .unwrap();
+        if let crate::RuntimeAction::Cue {
+            schedule_at_board, ..
+        } = &mut node.action
+        {
+            *schedule_at_board = false;
+        }
+        hub.start(
+            &[node],
+            FlowRole::Utility,
+            &screens(),
+            Arc::new(Semaphore::new(1)),
+            "test",
+        )
+        .unwrap();
         hub.cancel_pending();
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
@@ -594,5 +793,28 @@ mod tests {
         .await
         .unwrap();
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn mqtt_cue_is_dispatched_early_with_absolute_execution_time() {
+        let hub = WorkflowHub::default();
+        let (sender, rx) = crate::cue_link::CueLinkSender::channel(8);
+        let mut node = cue_node("scheduled", &[], sender, false);
+        node.at_ms = 10_000;
+        let before = now_ms();
+        hub.start(
+            &[node],
+            FlowRole::Utility,
+            &screens(),
+            Arc::new(Semaphore::new(1)),
+            "test",
+        )
+        .unwrap();
+        let outgoing = next_outgoing(&rx).await;
+        assert!(outgoing.execute_at_ms >= before + 9_900);
+        assert_eq!(outgoing.expires_after_ms, 500);
+        assert_eq!(outgoing.generation, hub.generation());
+        assert_eq!(hub.snapshot().runs[0].nodes[0].phase, Phase::Scheduled);
+        hub.cancel_pending();
     }
 }

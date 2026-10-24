@@ -3,8 +3,8 @@
 #include <Cue.h>
 #include <stdio.h>
 
-// Keep Cue v2 unchanged. A fresh event ID deduplicates each returned status;
-// the original command ID travels in the name as a fixed-width hex suffix.
+// A fresh event ID deduplicates each returned status; the original command ID
+// travels in the name as a fixed-width hex suffix.
 inline bool makeAssemblyStatus(
   cue::Node &node, uint64_t destination, const char *status,
   uint64_t command_id, cue::Message &message

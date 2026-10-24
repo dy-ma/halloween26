@@ -6,7 +6,7 @@ use std::{
 };
 
 use fx_audio::{FxError, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::screen::{EyeCommand, EyeSnapshot};
 
@@ -29,6 +29,8 @@ pub struct ShowConfig {
     pub assets: BTreeMap<String, AssetConfig>,
     #[serde(default)]
     pub sinks: BTreeMap<String, SinkConfig>,
+    #[serde(default)]
+    pub props: BTreeMap<String, PropConfig>,
     #[serde(default)]
     pub flows: BTreeMap<String, FlowConfig>,
     #[serde(default)]
@@ -187,6 +189,8 @@ impl ControlSection {
 pub struct FlowConfig {
     pub trigger: TriggerConfig,
     #[serde(default)]
+    pub role: FlowRole,
+    #[serde(default)]
     pub nodes: Vec<NodeConfig>,
 }
 
@@ -205,7 +209,39 @@ pub struct NodeConfig {
     pub at_ms: u64,
     #[serde(default)]
     pub after: Vec<String>,
+    /// Optional state transition in `prop.transition` form.
+    pub transition: Option<String>,
     pub action: ActionConfig,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FlowRole {
+    #[default]
+    Utility,
+    Show,
+    Reset,
+    Stop,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PropConfig {
+    pub label: String,
+    pub initial: String,
+    pub ready: String,
+    pub states: Vec<String>,
+    #[serde(default)]
+    pub transitions: BTreeMap<String, TransitionConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransitionConfig {
+    pub from: Vec<String>,
+    pub active: String,
+    pub to: String,
+    pub failure: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -504,6 +540,7 @@ fn validate(config: &ShowConfig) -> Result<()> {
     }
 
     validate_server(config, &screen_ids)?;
+    validate_props(config)?;
     for (flow_name, flow) in &config.flows {
         validate_flow(config, flow_name, flow)?;
     }
@@ -519,6 +556,54 @@ fn validate(config: &ShowConfig) -> Result<()> {
                 return Err(FxError::ShowConfig(format!(
                     "controls.{control_name}.key duplicates controls.{previous}.key"
                 )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_props(config: &ShowConfig) -> Result<()> {
+    for (prop_name, prop) in &config.props {
+        require_name(prop_name, "prop name")?;
+        require_name(&prop.label, &format!("props.{prop_name}.label"))?;
+        if prop.states.is_empty() {
+            return Err(FxError::ShowConfig(format!(
+                "props.{prop_name}.states must not be empty"
+            )));
+        }
+        let mut states = BTreeSet::new();
+        for state in &prop.states {
+            require_name(state, &format!("props.{prop_name}.states"))?;
+            if !states.insert(state.as_str()) {
+                return Err(FxError::ShowConfig(format!(
+                    "props.{prop_name}.states contains duplicate `{state}`"
+                )));
+            }
+        }
+        for (field, state) in [("initial", &prop.initial), ("ready", &prop.ready)] {
+            if !states.contains(state.as_str()) {
+                return Err(FxError::ShowConfig(format!(
+                    "props.{prop_name}.{field} references unknown state `{state}`"
+                )));
+            }
+        }
+        for (transition_name, transition) in &prop.transitions {
+            require_name(transition_name, "transition name")?;
+            if transition.from.is_empty() {
+                return Err(FxError::ShowConfig(format!(
+                    "props.{prop_name}.transitions.{transition_name}.from must not be empty"
+                )));
+            }
+            for state in transition.from.iter().chain([
+                &transition.active,
+                &transition.to,
+                &transition.failure,
+            ]) {
+                if !states.contains(state.as_str()) {
+                    return Err(FxError::ShowConfig(format!(
+                        "props.{prop_name}.transitions.{transition_name} references unknown state `{state}`"
+                    )));
+                }
             }
         }
     }
@@ -658,6 +743,32 @@ fn validate_flow(config: &ShowConfig, flow_name: &str, flow: &FlowConfig) -> Res
             )));
         }
         validate_action(config, flow_name, node)?;
+        if let Some(reference) = &node.transition {
+            let Some((prop, transition)) = reference.split_once('.') else {
+                return Err(FxError::ShowConfig(format!(
+                    "flows.{flow_name}.nodes.{}.transition must use prop.transition form",
+                    node.id
+                )));
+            };
+            if prop.is_empty() || transition.is_empty() || transition.contains('.') {
+                return Err(FxError::ShowConfig(format!(
+                    "flows.{flow_name}.nodes.{}.transition must use prop.transition form",
+                    node.id
+                )));
+            }
+            let Some(prop_config) = config.props.get(prop) else {
+                return Err(unknown_reference(
+                    &format!("flows.{flow_name}.nodes.{}.transition prop", node.id),
+                    prop,
+                ));
+            };
+            if !prop_config.transitions.contains_key(transition) {
+                return Err(unknown_reference(
+                    &format!("flows.{flow_name}.nodes.{}.transition", node.id),
+                    reference,
+                ));
+            }
+        }
     }
     let mut resolved = BTreeSet::new();
     for node in &flow.nodes {

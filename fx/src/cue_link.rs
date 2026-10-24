@@ -2,7 +2,7 @@ use std::{
     collections::{HashSet, VecDeque},
     sync::mpsc as std_mpsc,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use fx_audio::{FxError, Result};
@@ -23,6 +23,9 @@ pub(crate) struct OutgoingCue {
     pub(crate) id: u64,
     pub(crate) destination: String,
     pub(crate) event: String,
+    pub(crate) execute_at_ms: u64,
+    pub(crate) expires_after_ms: u32,
+    pub(crate) generation: u32,
     pub(crate) expires_at: Instant,
 }
 
@@ -37,19 +40,31 @@ impl CueLinkSender {
         (Self { sender }, receiver)
     }
 
-    pub fn try_emit_tracked(
+    pub fn try_emit_tracked_scheduled(
         &self,
         destination: String,
         event: String,
+        execute_at_ms: u64,
         lifetime: Duration,
+        generation: u32,
     ) -> Result<u64> {
         let id = (uuid::Uuid::new_v4().as_u128() as u64).max(1);
+        let expires_after_ms = lifetime.as_millis().min(u32::MAX as u128) as u32;
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        let lead = execute_at_ms.saturating_sub(now_ms);
         self.sender
             .try_send(OutgoingCue {
                 id,
                 destination,
                 event,
-                expires_at: Instant::now() + lifetime,
+                execute_at_ms,
+                expires_after_ms,
+                generation,
+                expires_at: Instant::now() + Duration::from_millis(lead) + lifetime,
             })
             .map(|_| id)
             .map_err(|error| FxError::Serial(format!("cue transmit queue unavailable: {error}")))

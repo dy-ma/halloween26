@@ -7,7 +7,7 @@ use std::{
         mpsc as std_mpsc,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
@@ -15,12 +15,13 @@ use tokio::sync::mpsc;
 
 use crate::cue_link::{CueLinkSender, EventMessage, OutgoingCue};
 
-const WIRE_SIZE: usize = 64;
+const WIRE_SIZE: usize = 80;
 const NAME_CAPACITY: usize = 32;
 const BROADCAST_NODE: u64 = 0xffff_ffff_ffff;
 const KIND_CUE: u8 = 1;
 const KIND_ACK: u8 = 2;
 const KIND_HELLO: u8 = 3;
+const KIND_CLOCK: u8 = 4;
 
 #[derive(Debug, Clone)]
 pub struct MqttLinkConfig {
@@ -39,6 +40,9 @@ struct Packet {
     source: u64,
     destination: u64,
     id: u64,
+    execute_at_ms: u64,
+    expires_after_ms: u32,
+    generation: u32,
     name: String,
 }
 
@@ -60,6 +64,7 @@ pub fn spawn_reconnecting_link(
     let inbox_topic = format!("{prefix}/cue/{:012X}", local_node);
     let presence_filter = format!("{prefix}/presence/+");
     let presence_topic = format!("{prefix}/presence/{:012X}", local_node);
+    let clock_topic = format!("{prefix}/clock");
     let (event_sender, event_receiver) = mpsc::channel(capacity);
     let (handle, outgoing_receiver) = CueLinkSender::channel(capacity);
     let (ack_sender, ack_receiver) = std_mpsc::sync_channel::<u64>(capacity);
@@ -154,6 +159,9 @@ pub fn spawn_reconnecting_link(
                                             source: local_node,
                                             destination: packet.source,
                                             id: packet.id,
+                                            execute_at_ms: 0,
+                                            expires_after_ms: 0,
+                                            generation: 0,
                                             name: String::new(),
                                         });
                                         let topic = format!(
@@ -213,6 +221,8 @@ pub fn spawn_reconnecting_link(
         .spawn(move || {
             let mut pending = Vec::<PendingCue>::new();
             let mut next_presence_at = Instant::now();
+            let mut next_clock_at = Instant::now();
+            let mut clock_sequence = 0_u64;
             loop {
                 while let Ok(id) = ack_receiver.try_recv() {
                     if let Some(index) = pending.iter().position(|cue| cue.packet.id == id) {
@@ -272,6 +282,9 @@ pub fn spawn_reconnecting_link(
                         source: local_node,
                         destination: BROADCAST_NODE,
                         id: 0,
+                        execute_at_ms: 0,
+                        expires_after_ms: 0,
+                        generation: 0,
                         name: "fx".into(),
                     });
                     let _ = client.try_publish(
@@ -281,6 +294,26 @@ pub fn spawn_reconnecting_link(
                         hello,
                     );
                     next_presence_at = now + Duration::from_secs(1);
+                }
+                if connected.load(Ordering::Acquire) && now >= next_clock_at {
+                    clock_sequence = clock_sequence.wrapping_add(1).max(1);
+                    let clock = encode_packet(&Packet {
+                        kind: KIND_CLOCK,
+                        source: local_node,
+                        destination: BROADCAST_NODE,
+                        id: clock_sequence,
+                        execute_at_ms: epoch_ms(),
+                        expires_after_ms: 0,
+                        generation: 0,
+                        name: String::new(),
+                    });
+                    let _ = client.try_publish(
+                        clock_topic.clone(),
+                        QoS::AtLeastOnce,
+                        false,
+                        clock,
+                    );
+                    next_clock_at = now + Duration::from_secs(1);
                 }
                 thread::sleep(Duration::from_millis(5));
             }
@@ -303,6 +336,9 @@ fn queue_outgoing(local_node: u64, outgoing: OutgoingCue, pending: &mut Vec<Pend
         source: local_node,
         destination,
         id: outgoing.id,
+        execute_at_ms: outgoing.execute_at_ms,
+        expires_after_ms: outgoing.expires_after_ms,
+        generation: outgoing.generation,
         name: outgoing.event,
     };
     pending.push(PendingCue {
@@ -323,41 +359,64 @@ fn parse_node(value: &str) -> Option<u64> {
         .filter(|node| *node != 0)
 }
 
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
 fn encode_packet(packet: &Packet) -> Vec<u8> {
     let mut bytes = vec![0_u8; WIRE_SIZE];
-    bytes[..4].copy_from_slice(b"CUE2");
-    bytes[4] = 2;
+    bytes[..4].copy_from_slice(b"CUE3");
+    bytes[4] = 3;
     bytes[5] = packet.kind;
     bytes[8..16].copy_from_slice(&packet.source.to_le_bytes());
     bytes[16..24].copy_from_slice(&packet.destination.to_le_bytes());
     bytes[24..32].copy_from_slice(&packet.id.to_le_bytes());
+    bytes[32..40].copy_from_slice(&packet.execute_at_ms.to_le_bytes());
+    bytes[40..44].copy_from_slice(&packet.expires_after_ms.to_le_bytes());
+    bytes[44..48].copy_from_slice(&packet.generation.to_le_bytes());
     let name = packet.name.as_bytes();
-    bytes[32..32 + name.len().min(NAME_CAPACITY - 1)]
+    bytes[48..48 + name.len().min(NAME_CAPACITY - 1)]
         .copy_from_slice(&name[..name.len().min(NAME_CAPACITY - 1)]);
     bytes
 }
 
 fn decode_packet(bytes: &[u8]) -> Option<Packet> {
-    if bytes.len() != WIRE_SIZE || &bytes[..4] != b"CUE2" || bytes[4] != 2 {
+    if bytes.len() != WIRE_SIZE || &bytes[..4] != b"CUE3" || bytes[4] != 3 {
         return None;
     }
     let kind = bytes[5];
-    if !matches!(kind, KIND_CUE | KIND_ACK | KIND_HELLO) {
+    if !matches!(kind, KIND_CUE | KIND_ACK | KIND_HELLO | KIND_CLOCK) {
         return None;
     }
     let source = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
     let destination = u64::from_le_bytes(bytes[16..24].try_into().ok()?);
     let id = u64::from_le_bytes(bytes[24..32].try_into().ok()?);
+    let execute_at_ms = u64::from_le_bytes(bytes[32..40].try_into().ok()?);
+    let expires_after_ms = u32::from_le_bytes(bytes[40..44].try_into().ok()?);
+    let generation = u32::from_le_bytes(bytes[44..48].try_into().ok()?);
     if source == 0 || source > BROADCAST_NODE {
         return None;
     }
-    let name_bytes = &bytes[32..];
+    if kind == KIND_CUE && execute_at_ms != 0 && (expires_after_ms == 0 || generation == 0) {
+        return None;
+    }
+    let name_bytes = &bytes[48..];
     let end = name_bytes.iter().position(|byte| *byte == 0)?;
     let name = std::str::from_utf8(&name_bytes[..end]).ok()?.to_string();
     match kind {
         KIND_CUE if destination != 0 && destination != source && id != 0 && !name.is_empty() => {}
         KIND_ACK if destination != 0 && destination != source && id != 0 => {}
         KIND_HELLO if destination == BROADCAST_NODE && id == 0 => {}
+        KIND_CLOCK
+            if destination == BROADCAST_NODE
+                && id != 0
+                && execute_at_ms != 0
+                && expires_after_ms == 0
+                && generation == 0 => {}
         _ => return None,
     }
     Some(Packet {
@@ -365,6 +424,9 @@ fn decode_packet(bytes: &[u8]) -> Option<Packet> {
         source,
         destination,
         id,
+        execute_at_ms,
+        expires_after_ms,
+        generation,
         name,
     })
 }
@@ -380,6 +442,9 @@ mod tests {
             source: 0x112233445566,
             destination: 0xAABBCCDDEEFF,
             id: 0x1234567800000001,
+            execute_at_ms: 1_800_000_000_000,
+            expires_after_ms: 2_000,
+            generation: 7,
             name: "dc:stop".into(),
         };
         let bytes = encode_packet(&packet);

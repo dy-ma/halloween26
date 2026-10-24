@@ -20,6 +20,7 @@ mod mqtt_input;
 mod screen;
 mod serial_input;
 mod show_config;
+mod state;
 mod web;
 mod workflow;
 
@@ -316,6 +317,7 @@ struct RuntimeNode {
     id: String,
     at_ms: u64,
     after: Vec<String>,
+    transition: Option<state::TransitionRef>,
     action: RuntimeAction,
 }
 
@@ -338,6 +340,7 @@ enum RuntimeAction {
         sender: cue_link::CueLinkSender,
         target: String,
         cue: String,
+        schedule_at_board: bool,
         expires_after_ms: u64,
         wait_for: Option<String>,
         timeout_ms: u64,
@@ -346,6 +349,7 @@ enum RuntimeAction {
 
 #[derive(Clone)]
 struct RuntimeControl {
+    role: show_config::FlowRole,
     press: Vec<RuntimeNode>,
     release: Vec<RuntimeNode>,
 }
@@ -356,6 +360,7 @@ struct DcProfileTarget {
     link: String,
     sender: cue_link::CueLinkSender,
     target: String,
+    schedule_at_board: bool,
 }
 
 const MIN_TUNABLE_STEPPER_RPM: u16 = 10;
@@ -431,6 +436,7 @@ fn dc_profile_nodes(
             id: format!("tune/{}/audio", target.sink),
             at_ms: 0,
             after: Vec::new(),
+            transition: None,
             action: RuntimeAction::Audio {
                 track: audio.track.clone(),
                 sink: audio.output.clone(),
@@ -443,12 +449,14 @@ fn dc_profile_nodes(
             id: format!("tune/{}/motor", target.sink),
             at_ms: u64::from(motor_delay_ms),
             after: Vec::new(),
+            transition: None,
             action: RuntimeAction::Cue {
                 sink: target.sink.clone(),
                 link: target.link.clone(),
                 sender: target.sender.clone(),
                 target: target.target.clone(),
                 cue,
+                schedule_at_board: target.schedule_at_board,
                 expires_after_ms: 1000,
                 wait_for: None,
                 timeout_ms: duration_ms + 2000,
@@ -633,9 +641,15 @@ impl RuntimeControl {
     }
 }
 
+#[derive(Clone)]
+struct RuntimeFlow {
+    role: show_config::FlowRole,
+    nodes: Vec<RuntimeNode>,
+}
+
 struct CompiledFlows {
-    by_trigger: BTreeMap<(String, String), Vec<RuntimeNode>>,
-    by_name: BTreeMap<String, Vec<RuntimeNode>>,
+    by_trigger: BTreeMap<(String, String), Vec<RuntimeFlow>>,
+    by_name: BTreeMap<String, RuntimeFlow>,
 }
 
 #[derive(Debug, Clone)]
@@ -974,7 +988,7 @@ async fn run_show(
 
     let (event_sender, mut events) = tokio::sync::mpsc::channel(128);
     let boards = web::BoardRegistry::default();
-    let workflows = workflow::WorkflowHub::default();
+    let workflows = workflow::WorkflowHub::new(state::StateHub::new(&show.props));
     let audio_slots = Arc::new(Semaphore::new(show.playback.max_active));
     let audio_runtime = audio_runtime::AudioRuntime::new(&show, Arc::clone(&audio_slots))?;
     workflows.set_audio(audio_runtime.clone());
@@ -1053,6 +1067,10 @@ async fn run_show(
                 link: link.clone(),
                 sender: cue_senders[link].clone(),
                 target: target.clone(),
+                schedule_at_board: matches!(
+                    show.links[link],
+                    show_config::LinkConfig::MqttCue { .. }
+                ),
             });
     }
     let (control_sender, mut control_requests) = tokio::sync::mpsc::channel(64);
@@ -1200,9 +1218,11 @@ async fn run_show(
             controls.insert(
                 id.clone(),
                 RuntimeControl {
+                    role: show_config::FlowRole::Utility,
                     press: vec![RuntimeNode {
                         id: id.clone(),
                         after: Vec::new(),
+                        transition: None,
                         at_ms: 0,
                         action: RuntimeAction::Screen {
                             screen_id: screen_id.clone(),
@@ -1307,13 +1327,13 @@ async fn run_show(
                     continue;
                 }
                 workflows.record(&message);
-                if message.event == "show:stop" { workflows.cancel_pending(); audio_runtime.stop_all(); }
                 dispatch_show_event(
                     &message,
                     &flows.by_trigger,
                     &screen_hub,
                     Arc::clone(&audio_slots),
                     &workflows,
+                    &audio_runtime,
                 );
             }
             request = control_requests.recv() => {
@@ -1329,8 +1349,11 @@ async fn run_show(
                             format!("unknown tunable DC sink `{}`", request.id)
                         }).and_then(|target| {
                             let nodes = playback_nodes(profile, target, &screen_hub, &controls)?;
+                            workflows.cancel_pending();
+                            audio_runtime.stop_all();
                             schedule_nodes(
                                 &nodes,
+                                show_config::FlowRole::Utility,
                                 &screen_hub,
                                 Arc::clone(&audio_slots),
                                 &format!("DC profile `{}`", request.id),
@@ -1344,9 +1367,20 @@ async fn run_show(
                         format!("unknown control `{}`", request.id)
                     }).and_then(|control| {
                         let nodes = control.nodes_for(request.phase, request.pwm, request.rpm)?;
-                        if request.id == "stop_all" { workflows.cancel_pending(); audio_runtime.stop_all(); }
+                        if matches!(control.role, show_config::FlowRole::Reset | show_config::FlowRole::Stop) {
+                            workflows.cancel_pending();
+                            audio_runtime.stop_all();
+                        } else if control.role == show_config::FlowRole::Utility
+                            && nodes.iter().any(|node| matches!(node.action, RuntimeAction::Cue { .. }))
+                        {
+                            // Direct motion/bench commands deliberately invalidate
+                            // the controller's position assumptions. A reset/home is
+                            // required before a show request is accepted again.
+                            workflows.cancel_pending();
+                        }
                         schedule_nodes(
                             &nodes,
+                            control.role,
                             &screen_hub,
                             Arc::clone(&audio_slots),
                             &format!("control `{}`", request.id),
@@ -1391,6 +1425,7 @@ async fn run_show(
                     match control.nodes_for(web::ControlPhase::Press, None, None)
                         .and_then(|nodes| schedule_nodes(
                             &nodes,
+                            control.role,
                             &screen_hub,
                             Arc::clone(&audio_slots),
                             "show reload safety stop",
@@ -1498,6 +1533,10 @@ fn compile_flows(
                         sender: cue_senders[link].clone(),
                         target: target.clone(),
                         cue: show_config::qualified_cue(namespace, cue),
+                        schedule_at_board: matches!(
+                            show.links[link],
+                            show_config::LinkConfig::MqttCue { .. }
+                        ),
                         expires_after_ms: *expires_after_ms,
                         wait_for: wait_for.clone(),
                         timeout_ms: *timeout_ms,
@@ -1512,14 +1551,22 @@ fn compile_flows(
                     .iter()
                     .map(|id| format!("{flow_name}/{id}"))
                     .collect(),
+                transition: node
+                    .transition
+                    .as_deref()
+                    .and_then(state::TransitionRef::parse),
                 action,
             });
         }
+        let runtime = RuntimeFlow {
+            role: flow.role,
+            nodes,
+        };
         compiled
             .entry((source_link, flow.trigger.cue.clone()))
             .or_insert_with(Vec::new)
-            .extend(nodes.clone());
-        named.insert(flow_name.clone(), nodes);
+            .push(runtime.clone());
+        named.insert(flow_name.clone(), runtime);
     }
     Ok(CompiledFlows {
         by_trigger: compiled,
@@ -1565,10 +1612,12 @@ fn live_display_control(id: &str, hub: &screen::ScreenHub) -> Option<RuntimeCont
         _ => return None,
     };
     Some(RuntimeControl {
+        role: show_config::FlowRole::Utility,
         press: vec![RuntimeNode {
             id: id.into(),
             at_ms: 0,
             after: Vec::new(),
+            transition: None,
             action: RuntimeAction::Screen {
                 screen_id: target.into(),
                 command,
@@ -1583,13 +1632,14 @@ fn live_display_control(id: &str, hub: &screen::ScreenHub) -> Option<RuntimeCont
 fn compile_controls(
     show: &show_config::ShowConfig,
     cue_senders: &BTreeMap<String, cue_link::CueLinkSender>,
-    flows: &BTreeMap<String, Vec<RuntimeNode>>,
+    flows: &BTreeMap<String, RuntimeFlow>,
 ) -> Result<BTreeMap<String, RuntimeControl>> {
     let mut compiled = BTreeMap::new();
     for (id, control) in &show.controls {
         let runtime = match control {
             show_config::ControlConfig::Flow { flow, .. } => RuntimeControl {
-                press: flows[flow].clone(),
+                role: flows[flow].role,
+                press: flows[flow].nodes.clone(),
                 release: Vec::new(),
             },
             show_config::ControlConfig::Cue {
@@ -1611,18 +1661,24 @@ fn compile_controls(
                     id: format!("control/{id}/{suffix}"),
                     at_ms: 0,
                     after: Vec::new(),
+                    transition: None,
                     action: RuntimeAction::Cue {
                         sink: sink.clone(),
                         link: link.clone(),
                         sender: cue_senders[link].clone(),
                         target: target.clone(),
                         cue: show_config::qualified_cue(namespace, cue),
+                        schedule_at_board: matches!(
+                            show.links[link],
+                            show_config::LinkConfig::MqttCue { .. }
+                        ),
                         expires_after_ms: *expires_after_ms,
                         wait_for: None,
                         timeout_ms: 10_000,
                     },
                 };
                 RuntimeControl {
+                    role: show_config::FlowRole::Utility,
                     press: vec![make_node("press", cue)],
                     release: release_cue
                         .as_deref()
@@ -1650,13 +1706,14 @@ async fn wait_for_server(address: std::net::SocketAddr) -> Result<()> {
 
 fn dispatch_show_event(
     message: &cue_link::EventMessage,
-    flows: &BTreeMap<(String, String), Vec<RuntimeNode>>,
+    flows: &BTreeMap<(String, String), Vec<RuntimeFlow>>,
     screen_hub: &ScreenHub,
     audio_slots: Arc<Semaphore>,
     workflows: &workflow::WorkflowHub,
+    audio: &audio_runtime::AudioRuntime,
 ) {
     let link = message.link.as_deref().unwrap_or("unknown");
-    let nodes = flows
+    let matching = flows
         .get(&(link.to_string(), message.event.clone()))
         .map(Vec::as_slice)
         .unwrap_or_default();
@@ -1666,32 +1723,42 @@ fn dispatch_show_event(
         .map(|value| format!(" at {value} dBm"))
         .unwrap_or_default();
     fx_log!(
-        "cue `{}` sequence {:?} from {source}{rssi} via `{link}`: scheduling {} node(s)",
+        "cue `{}` sequence {:?} from {source}{rssi} via `{link}`: matched {} flow(s)",
         message.event,
         message.sequence,
-        nodes.len()
+        matching.len()
     );
-
-    if let Err(error) = schedule_nodes(
-        nodes,
-        screen_hub,
-        audio_slots,
-        &format!("cue `{}`", message.event),
-        workflows,
-    ) {
-        fx_log!("could not schedule cue: {error}");
+    for flow in matching {
+        if matches!(
+            flow.role,
+            show_config::FlowRole::Reset | show_config::FlowRole::Stop
+        ) {
+            workflows.cancel_pending();
+            audio.stop_all();
+        }
+        if let Err(error) = schedule_nodes(
+            &flow.nodes,
+            flow.role,
+            screen_hub,
+            Arc::clone(&audio_slots),
+            &format!("cue `{}`", message.event),
+            workflows,
+        ) {
+            fx_log!("could not schedule cue: {error}");
+        }
     }
 }
 
 fn schedule_nodes(
     nodes: &[RuntimeNode],
+    role: show_config::FlowRole,
     screen_hub: &ScreenHub,
     audio_slots: Arc<Semaphore>,
     reason: &str,
     workflows: &workflow::WorkflowHub,
 ) -> std::result::Result<(), String> {
     fx_log!("{reason}: scheduling {} node(s)", nodes.len());
-    workflows.start(nodes, screen_hub, audio_slots, reason)
+    workflows.start(nodes, role, screen_hub, audio_slots, reason)
 }
 
 async fn execute_node(
@@ -1699,6 +1766,8 @@ async fn execute_node(
     screen_hub: &ScreenHub,
     _audio_slots: Arc<Semaphore>,
     workflows: &workflow::WorkflowHub,
+    execute_at_ms: Option<u64>,
+    generation: u32,
 ) -> std::result::Result<String, String> {
     match node.action {
         RuntimeAction::Audio {
@@ -1738,31 +1807,53 @@ async fn execute_node(
             sender,
             target,
             cue,
+            schedule_at_board: _,
             expires_after_ms,
             wait_for,
             timeout_ms,
         } => {
             // Subscribe before dispatch: a fast assembly can report immediately.
             let receiver = workflows.subscribe();
+            let scheduled_for = execute_at_ms.unwrap_or(0);
             let command_id = sender
-                .try_emit_tracked(
+                .try_emit_tracked_scheduled(
                     target.clone(),
                     cue.clone(),
+                    scheduled_for,
                     Duration::from_millis(expires_after_ms),
+                    generation,
                 )
                 .map_err(|e| e.to_string())?;
             fx_log!(
-                "node `{}` queued cue `{cue}` for `{target}` on `{sink}` as {command_id:016X}",
-                node.id
+                "node `{}` queued cue `{cue}` for `{target}` on `{sink}` as {command_id:016X}{} generation {generation}",
+                node.id,
+                execute_at_ms
+                    .map(|at| format!(" for {at}"))
+                    .unwrap_or_default(),
             );
             match wait_for {
                 Some(event) => {
+                    let timeout_ms = timeout_ms.saturating_add(
+                        execute_at_ms
+                            .unwrap_or(0)
+                            .saturating_sub(workflow::now_ms()),
+                    );
                     workflow::wait_for_status(
                         receiver, &link, &target, command_id, &event, timeout_ms,
                     )
                     .await
                 }
-                None => Ok("cue queued".into()),
+                None => {
+                    if let Some(at) = execute_at_ms {
+                        tokio::time::sleep(Duration::from_millis(
+                            at.saturating_sub(workflow::now_ms()),
+                        ))
+                        .await;
+                        Ok(format!("cue scheduled for {at}"))
+                    } else {
+                        Ok("cue queued".into())
+                    }
+                }
             }
         }
     }
@@ -2178,6 +2269,7 @@ mod cli_tests {
             link: "simulated".into(),
             sender,
             target: "00000000000A".into(),
+            schedule_at_board: false,
         }
     }
 
@@ -2187,18 +2279,21 @@ mod cli_tests {
             id: "test".into(),
             at_ms: 0,
             after: Vec::new(),
+            transition: None,
             action: RuntimeAction::Cue {
                 sink: "dc_a".into(),
                 link: "simulated".into(),
                 sender: sender.clone(),
                 target: "00000000000A".into(),
                 cue: cue.into(),
+                schedule_at_board: false,
                 expires_after_ms: 500,
                 wait_for: None,
                 timeout_ms: 1000,
             },
         };
         RuntimeControl {
+            role: show_config::FlowRole::Utility,
             press: vec![node(cue)],
             release: vec![node("dc:stop")],
         }
@@ -2634,9 +2729,11 @@ mod cli_tests {
             gaze: screen::Gaze { x: 0.0, y: 0.0 },
         };
         let mut control = RuntimeControl {
+            role: show_config::FlowRole::Utility,
             press: vec![RuntimeNode {
                 id: "legacy-reset".into(),
                 after: Vec::new(),
+                transition: None,
                 at_ms: 0,
                 action: RuntimeAction::Screen {
                     screen_id: "eye".into(),

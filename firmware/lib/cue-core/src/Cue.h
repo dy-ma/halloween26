@@ -6,19 +6,28 @@
 namespace cue {
 
 constexpr size_t kNameCapacity = 32;
-constexpr size_t kWireSize = 64;
+constexpr size_t kWireSize = 80;
 constexpr uint64_t kBroadcastNode = 0xffffffffffffULL;
 
 enum class PacketKind : uint8_t {
   CUE = 1,
   ACK = 2,
   HELLO = 3,
+  CLOCK = 4,
 };
 
 struct Message {
   uint64_t source = 0;
   uint64_t destination = 0;
   uint64_t id = 0;
+  // Zero means execute immediately. Scheduled commands use Unix epoch time so
+  // independently connected boards can start together after clock sync.
+  uint64_t execute_at_ms = 0;
+  // Validity window beginning at execute_at_ms (or receipt for immediate
+  // commands). Zero is permitted for board-originated events and HELLOs.
+  uint32_t expires_after_ms = 0;
+  // Controller cancellation epoch. A newer generation invalidates older work.
+  uint32_t generation = 0;
   char name[kNameCapacity] = {};
 };
 
@@ -48,6 +57,7 @@ Packet makeAckPacket(
   bool has_reported_rssi
 );
 Packet makeHelloPacket(uint64_t source, const char *service = nullptr);
+Packet makeClockPacket(uint64_t source, uint64_t epoch_ms, uint64_t sequence);
 
 template <size_t Capacity>
 class DuplicateCache {
