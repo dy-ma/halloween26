@@ -1,0 +1,10 @@
+// Permit the unprivileged show controller to restart only its local MQTT
+// broker. The dashboard gains no general service-management or sudo access.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "mosquitto.service" &&
+        action.lookup("verb") === "restart" &&
+        subject.user === "dyma") {
+        return polkit.Result.YES;
+    }
+});

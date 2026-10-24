@@ -94,6 +94,7 @@ pub struct SystemRegistry {
     started_at: Instant,
     started_at_ms: u64,
     hostname: String,
+    broker_restart_available: bool,
     links: Arc<Mutex<Vec<LinkRecord>>>,
 }
 
@@ -112,6 +113,7 @@ struct SystemStatus {
     uptime_ms: u64,
     hostname: String,
     wifi_ssid: Option<String>,
+    broker_restart_available: bool,
     links: Vec<LinkStatus>,
     battery_percent: Option<u8>,
 }
@@ -142,6 +144,7 @@ impl SystemRegistry {
             started_at: Instant::now(),
             started_at_ms,
             hostname: hostname(),
+            broker_restart_available: broker_restart_available(),
             links: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -170,6 +173,7 @@ impl SystemRegistry {
             uptime_ms: self.started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
             hostname: self.hostname.clone(),
             wifi_ssid: wifi_ssid(),
+            broker_restart_available: self.broker_restart_available,
             links: self
                 .links
                 .lock()
@@ -219,6 +223,27 @@ fn wifi_ssid() -> Option<String> {
             })
         })
     })
+}
+
+fn broker_restart_available() -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    Command::new("pkcheck")
+        .args([
+            "--action-id",
+            "org.freedesktop.systemd1.manage-units",
+            "--process",
+            &std::process::id().to_string(),
+            "--detail",
+            "unit",
+            "mosquitto.service",
+            "--detail",
+            "verb",
+            "restart",
+        ])
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[derive(Clone, Default)]
@@ -484,6 +509,10 @@ fn app(static_dir: PathBuf, screen_id: String, hub: ScreenHub, control: ControlS
         .route("/api/system", get(system_status))
         .route("/api/timing", axum::routing::post(update_timing))
         .route("/api/runtime/reload", axum::routing::post(runtime_reload))
+        .route(
+            "/api/lifecycle/broker/restart",
+            axum::routing::post(broker_restart),
+        )
         .route("/api/audio", get(audio_status).post(audio_action))
         .route("/api/volume/{output}", get(volume_get).post(volume_set))
         .route("/ws", any(websocket))
@@ -533,6 +562,64 @@ async fn runtime_reload(State(state): State<WebState>, headers: HeaderMap) -> Re
         return (StatusCode::SERVICE_UNAVAILABLE, "show runtime unavailable").into_response();
     }
     Json(serde_json::json!({ "status": "restarting" })).into_response()
+}
+
+async fn broker_restart(State(state): State<WebState>, headers: HeaderMap) -> Response {
+    if !same_origin_or_non_browser(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !cfg!(target_os = "linux") {
+        return (
+            StatusCode::CONFLICT,
+            "broker restart is available only on the Linux controller",
+        )
+            .into_response();
+    }
+    let restart = tokio::task::spawn_blocking(|| {
+        Command::new("systemctl")
+            .args([
+                "--no-ask-password",
+                "restart",
+                "mosquitto.service",
+            ])
+            .output()
+    });
+    match timeout(Duration::from_secs(8), restart).await {
+        Ok(Ok(Ok(output))) if output.status.success() => {
+            state
+                .control
+                .workflows
+                .note("Dashboard restarted the MQTT broker".into());
+            Json(serde_json::json!({ "status": "restarted" })).into_response()
+        }
+        Ok(Ok(Ok(output))) => {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            (
+                StatusCode::BAD_GATEWAY,
+                if detail.is_empty() {
+                    "systemctl could not restart mosquitto.service".into()
+                } else {
+                    detail
+                },
+            )
+                .into_response()
+        }
+        Ok(Ok(Err(error))) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("could not run systemctl: {error}"),
+        )
+            .into_response(),
+        Ok(Err(error)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("broker restart task failed: {error}"),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            "broker restart did not finish within 8 seconds",
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Deserialize)]

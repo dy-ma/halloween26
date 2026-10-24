@@ -48,7 +48,6 @@ export function ActivityLog({ entries }: { entries: ActivityEntry[] }) {
         ))}
         {!visible.length && <p className="log-empty">No matching activity.</p>}
       </div>
-      <p className="status-note">Last 500 events · Scroll back to pause following · Cleared when the server restarts</p>
     </section>
   )
 }

@@ -9,9 +9,9 @@ body[data-mode='control'] {
 body[data-mode='control'] #root { height: auto; min-height: 100%; }
 
 .control-shell {
-  width: min(1240px, calc(100% - 32px));
+  width: min(1480px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 24px 0 48px;
+  padding: 18px 0 48px;
 }
 
 .control-shell header {
@@ -30,7 +30,7 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 .control-shell h1 { font-size: 1.75rem; }
 .control-shell h2 { margin-bottom: 12px; font-size: 1.2rem; }
 .control-shell header p { margin-top: 4px; color: #555; }
-.control-shell section { margin-top: 28px; }
+.control-shell section { margin-top: 20px; }
 
 .runtime-status {
   padding: 6px 10px;
@@ -109,23 +109,24 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 .section-heading-row p { color: #666; font-size: 0.875rem; }
 
 .system-overview {
-  margin-top: 20px !important;
-  padding: 18px;
-  border: 1px solid #c7c7c7;
+  margin-top: 14px !important;
+  padding: 14px;
+  border: 1px solid #bfc3c9;
   background: #fff;
 }
 
-.system-overview-heading {
+.system-console-heading,
+.system-title {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
 }
 
-.system-overview-heading h2 { margin: 2px 0 0; }
+.system-title { justify-content: flex-start; }
+.system-title h2 { margin: 1px 0 0; }
 .mode-badge {
-  padding: 7px 11px;
+  padding: 5px 9px;
   border: 1px solid #aaa;
   border-radius: 999px;
   background: #f4f4f4;
@@ -141,20 +142,25 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 .mode-badge--halted,
 .mode-badge--fault { border-color: #a32727; color: #8a1f1f; background: #fff0f0; }
 
-.status-card-grid {
+.health-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.status-card {
-  min-width: 0;
-  padding: 12px;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 0;
+  margin: 13px 0 0;
   border: 1px solid #ddd;
   background: #fafafa;
 }
-.status-card strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
-.status-card small { display: block; margin-top: 4px; color: #666; }
+
+.health-metric {
+  min-width: 0;
+  padding: 9px 11px;
+  border-right: 1px solid #ddd;
+}
+.health-metric:last-child { border-right: 0; }
+.health-metric dt { color: #666; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.health-metric dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.health-metric strong { font-size: 0.88rem; }
+.health-metric small { display: block; margin-top: 1px; color: #666; font-size: 0.7rem; }
 .status-light {
   display: inline-block;
   width: 8px;
@@ -165,6 +171,24 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 }
 .status-light--online { background: #218739; }
 .status-light--offline { background: #a32727; }
+
+.lifecycle-actions { display: flex; gap: 7px; }
+.lifecycle-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid #8d939b;
+  border-radius: 4px;
+  color: #333;
+  background: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.lifecycle-actions .restart-fx { border-color: #9d5a55; color: #8a2822; }
+.lifecycle-actions button:hover:not(:disabled) { background: #f0f2f4; }
+.lifecycle-actions button:disabled { opacity: 0.45; cursor: default; }
+.system-action-status { display: block; margin-top: 8px; color: #5a5f66; font-size: 0.78rem; }
 
 .show-control-section {
   padding: 18px;
@@ -183,7 +207,7 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 .prop-state-card,
 .prop-graph {
   min-width: 0;
-  padding: 14px;
+  padding: 12px 14px 8px;
   border: 1px solid #ccc;
   background: #fff;
 }
@@ -198,7 +222,8 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 .prop-graph-heading h3 { margin: 2px 0 0; font-size: 1rem; }
 .prop-state-heading code,
 .prop-graph-heading span { color: #666; font-size: 0.72rem; }
-.prop-graph-heading > strong { text-transform: capitalize; }
+.prop-graph-heading > strong { color: #333; font-size: 0.82rem; text-transform: capitalize; }
+.prop-graph-heading > strong.state-active { color: #1f579b; }
 .prop-ready {
   padding: 4px 7px;
   border-radius: 3px;
@@ -240,6 +265,31 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 .eye-state-details { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px; }
 .eye-state-details div { min-width: 100px; }
 .eye-state-details strong { display: block; margin-top: 3px; }
+
+.state-machine { display: block; width: 100%; height: auto; margin-top: 3px; overflow: visible; }
+.state-machine marker path { fill: #8b929a; }
+.state-machine .machine-failure-marker path { fill: #b35b55; }
+.machine-edges path {
+  fill: none;
+  stroke: #aeb4bb;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.machine-edges path.active { stroke: #3974bd; stroke-width: 2.5; }
+.machine-edges path.failure { stroke: #c78580; stroke-dasharray: 4 4; }
+.machine-state rect { fill: #fafafa; stroke: #aeb4bb; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.machine-state text,
+.machine-transition text { fill: #50555c; font: 600 14px system-ui, sans-serif; text-anchor: middle; text-transform: capitalize; }
+.machine-state.ready rect { fill: #f5fbf6; stroke: #218739; stroke-width: 2; }
+.machine-state.current rect { fill: #e8f2ff; stroke: #3974bd; stroke-width: 2.5; }
+.machine-state.current text { fill: #1f579b; }
+.machine-state .machine-state-tag { fill: #218739; font-size: 8px; font-weight: 800; letter-spacing: 0.08em; }
+.machine-transition rect { fill: #f1f3f5; stroke: #8e969f; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.machine-transition .machine-transition-phase { fill: #777f87; font-size: 9px; font-weight: 500; }
+.machine-transition.active rect { fill: #e8f2ff; stroke: #3974bd; stroke-width: 2.5; }
+.machine-transition.active text { fill: #1f579b; }
+.eye-mode-edge { stroke: #9bb5ae; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.eye-machine-detail { fill: #49645d; font: 11px system-ui, sans-serif; }
 
 .run-timeline {
   padding: 14px;
@@ -509,11 +559,15 @@ body[data-mode='control'] #root { height: auto; min-height: 100%; }
 @media (max-width: 680px) {
   .control-shell header { align-items: flex-start; flex-direction: column; }
   .runtime-actions { width: 100%; align-items: stretch; flex-direction: column; }
-  .system-overview-heading,
+  .system-console-heading,
   .section-heading-row,
   .run-timeline-header { flex-direction: column; align-items: flex-start; }
-  .status-card-grid,
-  .prop-state-grid { grid-template-columns: 1fr; }
+  .lifecycle-actions { width: 100%; }
+  .lifecycle-actions button { flex: 1; }
+  .health-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .health-metric { border-bottom: 1px solid #ddd; }
+  .prop-state-grid,
+  .prop-graph-grid { grid-template-columns: 1fr; }
   .show-control-grid { grid-template-columns: 1fr; }
   .run-node { grid-template-columns: 70px minmax(0, 1fr); }
   .run-node small,

@@ -65,6 +65,7 @@ export type SystemStatus = {
   uptimeMs: number
   hostname: string
   wifiSsid: string | null
+  brokerRestartAvailable: boolean
   batteryPercent: number | null
   links: { id: string; transport: string; endpoint: string; connected: boolean }[]
 }

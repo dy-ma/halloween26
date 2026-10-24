@@ -3,7 +3,7 @@ import type { TimingStatus } from './dashboard-types'
 
 export function TimingEditor({ timings, onUpdated }: { timings: TimingStatus[]; onUpdated: (nodeId: string, atMs: number) => void }) {
   const [drafts, setDrafts] = useState<Record<string, number>>({})
-  const [message, setMessage] = useState('Runtime-only overrides reset when FX restarts.')
+  const [message, setMessage] = useState('')
 
   const save = async (timing: TimingStatus) => {
     const atMs = drafts[timing.nodeId] ?? timing.atMs
@@ -28,7 +28,7 @@ export function TimingEditor({ timings, onUpdated }: { timings: TimingStatus[]; 
     return groups
   }, new Map())
   return <section aria-labelledby="timing-heading">
-    <div className="section-heading-row"><div><p className="eyebrow">Choreography</p><h2 id="timing-heading">Execution timing</h2></div><p>{message}</p></div>
+    <div className="section-heading-row"><div><p className="eyebrow">Choreography</p><h2 id="timing-heading">Execution timing</h2></div>{message && <output aria-live="polite">{message}</output>}</div>
     <div className="timing-groups">
       {[...grouped].map(([flow, nodes]) => <article className="timing-group" key={flow}>
         <h3>{flow.replaceAll('_', ' ')}</h3>

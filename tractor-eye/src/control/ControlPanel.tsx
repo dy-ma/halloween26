@@ -92,6 +92,7 @@ export function ControlPanel() {
   const [status, setStatus] = useState('Connecting…')
   const [busy, setBusy] = useState<Set<string>>(() => new Set())
   const [reloading, setReloading] = useState(false)
+  const [restartingBroker, setRestartingBroker] = useState(false)
   const [driveLevels, setDriveLevels] = useState<Record<string, number>>({})
   const [stepperSpeeds, setStepperSpeeds] = useState<Record<string, number>>({})
   // Heartbeats read the latest setting without recreating keyboard listeners
@@ -210,9 +211,9 @@ export function ControlPanel() {
   }, [])
 
   const reloadShow = async () => {
-    if (!manifest || !window.confirm('Stop all activity and restart FX to reload the show configuration?')) return
+    if (!manifest || !window.confirm('Stop all activity and restart the FX controller?')) return
     setReloading(true)
-    setStatus('Stopping activity and reloading show configuration…')
+    setStatus('Stopping activity and restarting FX…')
     try {
       const response = await fetch('/api/runtime/reload', {
         method: 'POST',
@@ -236,8 +237,27 @@ export function ControlPanel() {
       }
       throw new Error('FX did not return within 15 seconds')
     } catch (error) {
-      setStatus(`Show reload failed: ${String(error)}`)
+      setStatus(`FX restart failed: ${String(error)}`)
       setReloading(false)
+    }
+  }
+
+  const restartBroker = async () => {
+    if (!window.confirm('Restart the MQTT broker? Board connections will briefly drop and reconnect.')) return
+    setRestartingBroker(true)
+    setStatus('Restarting MQTT broker…')
+    try {
+      const response = await fetch('/api/lifecycle/broker/restart', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })
+      if (!response.ok) throw new Error(await response.text())
+      setStatus('MQTT broker restarted; boards are reconnecting.')
+    } catch (error) {
+      setStatus(`Broker restart failed: ${String(error)}`)
+    } finally {
+      setRestartingBroker(false)
     }
   }
 
@@ -484,18 +504,16 @@ export function ControlPanel() {
           <h1>FX Control</h1>
           <p>{manifest?.show ?? 'Loading show…'}</p>
         </div>
-        <div className="runtime-actions">
-          <p className="runtime-status" role="status">{status}</p>
-          {manifest?.reloadAvailable && <button type="button" disabled={reloading}
-            onClick={() => void reloadShow()}>{reloading ? 'Reloading…' : 'Reload show'}</button>}
-        </div>
       </header>
 
       <SystemOverview runtime={runtime} system={system} screens={screens}
-        boardsOnline={boards.filter(board => board.online).length} boardsTotal={boards.length} />
+        boardsOnline={boards.filter(board => board.online).length} boardsTotal={boards.length}
+        restartFxAvailable={Boolean(manifest?.reloadAvailable)} restartingFx={reloading}
+        restartingBroker={restartingBroker} actionStatus={status}
+        onRestartFx={() => void reloadShow()} onRestartBroker={() => void restartBroker()} />
 
       <section aria-labelledby="show-controls" className="show-control-section">
-        <div className="section-heading-row"><div><p className="eyebrow">Operator actions</p><h2 id="show-controls">Show</h2></div><p>Controller is {runtime.state.mode.replace('-', ' ')}</p></div>
+        <div className="section-heading-row"><div><p className="eyebrow">Operator actions</p><h2 id="show-controls">Show</h2></div></div>
         <div className="control-grid show-control-grid">
           {flows.map(controlButton)}
           {!flows.length && <p>No show controls configured.</p>}
@@ -531,7 +549,6 @@ export function ControlPanel() {
             </tbody>
           </table>
         </div>
-        <p className="status-note">Online is live discovery. Assembly reports describe what the firmware observed; a delivery acknowledgment alone does not confirm motion or position.</p>
       </section>
 
       <ActivityLog entries={runtime.log ?? []} />

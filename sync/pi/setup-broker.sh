@@ -13,6 +13,7 @@ if ! command -v mosquitto >/dev/null 2>&1 || ! command -v mosquitto_sub >/dev/nu
 fi
 
 install -m 0644 "$script_dir/mosquitto-test.conf" /etc/mosquitto/conf.d/halloween-test.conf
+install -m 0644 "$script_dir/49-halloween-mosquitto.rules" /etc/polkit-1/rules.d/49-halloween-mosquitto.rules
 systemctl enable mosquitto.service
 systemctl restart mosquitto.service
 systemctl --no-pager --full status mosquitto.service

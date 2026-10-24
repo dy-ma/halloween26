@@ -176,7 +176,7 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
 }) {
   const [draft, setDraft] = useState<Draft>(loadDraft)
   const [audio, setAudio] = useState<AudioStatus | null>(null)
-  const [status, setStatus] = useState('Ready — changing fields does not move the motor.')
+  const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [playheadMs, setPlayheadMs] = useState<number | null>(null)
   const isPreviewing = playheadMs !== null
@@ -318,7 +318,7 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
   return <section aria-labelledby="dc-curve-heading">
     <div className="dc-curve-heading">
       <h2 id="dc-curve-heading">Motion timing tuner</h2>
-      <output className="runtime-status" aria-live="polite">{status}</output>
+      {status && <output className="runtime-status" aria-live="polite">{status}</output>}
     </div>
     <div className="dc-curve-layout">
       <div className="dc-curve-controls">
@@ -382,14 +382,12 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
           <span>DC motor {(motorDuration / 1000).toFixed(2)}s</span>
           <code>{cue}</code>
         </div>
-        {draft.eyeDevice && <p className="eye-timing-note">Wake shifts the whole animation; the other markers are fixed milestones, not completion feedback. All tabs of the selected display receive Wake. Each run restarts it from closed.</p>}
         <fieldset className="dc-play-components">
           <legend>Apply</legend>
           {([['playAudio', 'Audio'], ['playMotor', 'DC motor'], ['playStepper', 'Stepper'], ['playEye', 'Eye']] as const).map(([field, label]) =>
             <label key={field}><input type="checkbox" checked={draft[field]}
               onChange={event => setDraft(current => ({ ...current, [field]: event.target.checked }))} />{label}</label>)}
         </fieldset>
-        <p className="eye-timing-note">Unchecked components won’t run. Delays stay relative to Play, even without audio.</p>
         {playbackError && <p className="dc-curve-error" role="alert">{playbackError}</p>}
         <div className="dc-curve-actions">
           <button type="button" disabled={busy || Boolean(playbackError)} onClick={() => void run(Date.now())}>Play</button>

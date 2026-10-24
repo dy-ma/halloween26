@@ -60,7 +60,9 @@ sudo sh /home/dyma/halloween/2026/sync/pi/setup-broker.sh
 This installs Mosquitto and its CLI tools if needed, then enables its system
 service with listeners on loopback and `192.168.8.133`, TCP port 1883. This is
 an anonymous test broker for the show LAN. Its configuration is saved at
-`/etc/mosquitto/conf.d/halloween-test.conf`.
+`/etc/mosquitto/conf.d/halloween-test.conf`. It also installs a narrow Polkit
+rule that lets the `dyma` show controller restart only `mosquitto.service` from
+the dashboard; it does not grant general service management or sudo access.
 
 The `fx-mqtt` user service owns the coordinator and eye kiosk. Install it as
 the normal Pi desktop user:
