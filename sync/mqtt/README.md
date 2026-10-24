@@ -85,12 +85,11 @@ tail -n 50 /tmp/fx-run.log
 systemctl --user restart fx-mqtt.service
 ```
 
-Chromium may ask to unlock the login keyring on the physical Pi display after
-desktop auto-login. Enter the Pi account password there. Until the prompt is
-unlocked, the broker and dashboard can be running while the eye has not
-registered a live connection. Confirm `Pi-eye` has a connection in
-`/api/displays`. Other browser displays register automatically; saved offline
-devices can be forgotten from the dashboard.
+The managed kiosk launches Chromium with `--password-store=basic`. The eye page
+does not store browser credentials, and this prevents Secret Service / GNOME
+Keyring from blocking unattended startup with a password prompt. Confirm
+`Pi-eye` has a connection in `/api/displays`. Other browser displays register
+automatically; saved offline devices can be forgotten from the dashboard.
 
 The broker and `fx` remain separate services. To switch back to ESP-NOW, stop
 `fx-mqtt` before running the ESP-NOW show so only one coordinator owns port

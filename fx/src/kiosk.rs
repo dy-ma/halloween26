@@ -50,6 +50,10 @@ impl ManagedKiosk {
             .args([
                 "--kiosk",
                 "--no-first-run",
+                // The kiosk never stores credentials. Avoid Chromium opening
+                // Secret Service / GNOME Keyring and blocking unattended boot
+                // on an unlock-password dialog.
+                "--password-store=basic",
                 "--disable-session-crashed-bubble",
             ])
             .arg(&options.url)
