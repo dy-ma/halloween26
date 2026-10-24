@@ -1,0 +1,41 @@
+[
+  {
+    "model": "hub-6-way",
+    "material": "pla",
+    "supports": true,
+    "gcode_summary": [
+      "; model printing time: 1h 11m 28s; total estimated time: 1h 17m 42s",
+      "; total filament length [mm] : 16817.68",
+      "; total filament volume [cm^3] : 40451.27",
+      "; total filament weight [g] : 50.97"
+    ],
+    "model_time": "1h 11m 28s",
+    "filament_g": 50.97
+  },
+  {
+    "model": "polygon-6-way",
+    "material": "pla",
+    "supports": false,
+    "gcode_summary": [
+      "; model printing time: 43m 29s; total estimated time: 49m 43s",
+      "; total filament length [mm] : 16291.16",
+      "; total filament volume [cm^3] : 39184.84",
+      "; total filament weight [g] : 49.37"
+    ],
+    "model_time": "43m 29s",
+    "filament_g": 49.37
+  },
+  {
+    "model": "rib-6-way",
+    "material": "pla",
+    "supports": false,
+    "gcode_summary": [
+      "; model printing time: 36m 30s; total estimated time: 42m 44s",
+      "; total filament length [mm] : 11030.32",
+      "; total filament volume [cm^3] : 26531.04",
+      "; total filament weight [g] : 33.43"
+    ],
+    "model_time": "36m 30s",
+    "filament_g": 33.43
+  }
+]

@@ -91,6 +91,9 @@ test('hello, atomic snapshot, ordered commands and duplicate suppression', t => 
   h.socket.receive(command(9))
   assert.deepEqual(h.received.map(c => c.type), ['eye/snapshot', 'eye/wake'])
   assert.equal(h.statuses.at(-1)?.lastAcceptedSeq, 11)
+  assert.deepEqual(h.socket.sent.filter(message => message.type === 'applied'), [
+    { v: 1, type: 'applied', sessionId: 'boot-1', seq: 11 },
+  ])
 })
 
 for (const [name, message] of [

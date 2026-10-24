@@ -1,0 +1,16 @@
+[
+  {
+    "model": "cloth-socket-test",
+    "material": "pla",
+    "supports": false,
+    "layer_height_mm": 0.56,
+    "gcode_summary": [
+      "; model printing time: 12m 38s; total estimated time: 18m 52s",
+      "; total filament length [mm] : 4222.79",
+      "; total filament volume [cm^3] : 10157.01",
+      "; total filament weight [g] : 12.80"
+    ],
+    "model_time": "12m 38s",
+    "filament_g": 12.8
+  }
+]

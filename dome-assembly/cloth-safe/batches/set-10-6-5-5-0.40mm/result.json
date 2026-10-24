@@ -1,0 +1,430 @@
+{
+    "error_string": "Success.",
+    "export_time": 3485,
+    "layer_height": 0.4000000059604645,
+    "plate_index": 0,
+    "prepare_time": 3934,
+    "return_code": 0,
+    "sliced_plates": [
+        {
+            "feature_type_times": {
+                "Bottom surface": 823.829833984375,
+                "Bridge": 652.22900390625,
+                "Custom": 364.9852600097656,
+                "Flush": 25.0,
+                "Gap infill": 1801.378662109375,
+                "Inner wall": 8295.5185546875,
+                "Internal solid infill": 3547.1435546875,
+                "Outer wall": 5272.8603515625,
+                "Overhang wall": 160.8333740234375,
+                "Sparse infill": 2408.801513671875,
+                "Top surface": 2680.039306640625,
+                "Travel": 3823.844482421875,
+                "Undefined": 3807.317626953125
+            },
+            "filament_change_times": 0,
+            "filaments": [
+                {
+                    "filament_id": "GFA00",
+                    "id": 1,
+                    "main_used_g": 511.9328308105469,
+                    "total_used_g": 511.9328308105469
+                }
+            ],
+            "generate_support_material_time": 154,
+            "id": 1,
+            "infill_time": 601,
+            "layer_filament_change": 0,
+            "main_predication": 29448.185546875,
+            "make_perimeters_time": 787,
+            "obj_cached_cnt": 0,
+            "objects": [
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044479370117,
+                        "x": 191.3994598388672,
+                        "y": 188.928955078125,
+                        "z": 0.0
+                    },
+                    "id": 316,
+                    "name": "cloth-6-way.stl_1",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044479370117,
+                        "x": 191.3994598388672,
+                        "y": 124.39159393310547,
+                        "z": 0.0
+                    },
+                    "id": 327,
+                    "name": "cloth-6-way.stl_2",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 126.44839477539063,
+                        "y": 188.928955078125,
+                        "z": 0.0
+                    },
+                    "id": 338,
+                    "name": "cloth-6-way.stl_3",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 126.44839477539063,
+                        "y": 124.39159393310547,
+                        "z": 0.0
+                    },
+                    "id": 349,
+                    "name": "cloth-6-way.stl_4",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044479370117,
+                        "x": 191.3994598388672,
+                        "y": 59.8542366027832,
+                        "z": 0.0
+                    },
+                    "id": 360,
+                    "name": "cloth-6-way.stl_5",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 61.497337341308594,
+                        "y": 188.928955078125,
+                        "z": 0.0
+                    },
+                    "id": 371,
+                    "name": "cloth-6-way.stl_6",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 126.44839477539063,
+                        "y": 59.8542366027832,
+                        "z": 0.0
+                    },
+                    "id": 382,
+                    "name": "cloth-6-way.stl_7",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 61.497337341308594,
+                        "y": 124.39159393310547,
+                        "z": 0.0
+                    },
+                    "id": 393,
+                    "name": "cloth-6-way.stl_8",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 61.497337341308594,
+                        "y": 59.8542366027832,
+                        "z": 0.0
+                    },
+                    "id": 404,
+                    "name": "cloth-6-way.stl_9",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 63.483070373535156,
+                        "height": 28.25,
+                        "width": 63.60044860839844,
+                        "x": 1.000045657157898,
+                        "y": 166.98504638671875,
+                        "z": 0.0
+                    },
+                    "id": 415,
+                    "name": "cloth-6-way.stl_10",
+                    "triangle_count": 29948
+                },
+                {
+                    "bbox": {
+                        "depth": 89.46134948730469,
+                        "height": 28.25,
+                        "width": 89.46134948730469,
+                        "x": 147.83425903320313,
+                        "y": -10.177462577819824,
+                        "z": 0.0
+                    },
+                    "id": 459,
+                    "name": "cloth-5-way.stl_4",
+                    "triangle_count": 24230
+                },
+                {
+                    "bbox": {
+                        "depth": 61.79234313964844,
+                        "height": 28.25,
+                        "width": 64.72510528564453,
+                        "x": 93.58747863769531,
+                        "y": 5.783233165740967,
+                        "z": 0.0
+                    },
+                    "id": 437,
+                    "name": "cloth-5-way.stl_2",
+                    "triangle_count": 24230
+                },
+                {
+                    "bbox": {
+                        "depth": 61.79234313964844,
+                        "height": 28.25,
+                        "width": 64.72510528564453,
+                        "x": 26.862497329711914,
+                        "y": 5.783233165740967,
+                        "z": 0.0
+                    },
+                    "id": 448,
+                    "name": "cloth-5-way.stl_3",
+                    "triangle_count": 24230
+                },
+                {
+                    "bbox": {
+                        "depth": 89.46134185791016,
+                        "height": 28.25,
+                        "width": 89.46134948730469,
+                        "x": -10.708120346069336,
+                        "y": 85.05155944824219,
+                        "z": 0.0
+                    },
+                    "id": 426,
+                    "name": "cloth-5-way.stl_1",
+                    "triangle_count": 24230
+                }
+            ],
+            "sliced_time": 10655,
+            "sliced_time_with_cache": 8574,
+            "total_predication": 29846.64453125,
+            "triangle_count": 396400,
+            "warning_message": ""
+        },
+        {
+            "feature_type_times": {
+                "Bottom surface": 559.0552978515625,
+                "Bridge": 407.558349609375,
+                "Custom": 365.30426025390625,
+                "Flush": 25.0,
+                "Gap infill": 1168.6488037109375,
+                "Inner wall": 5634.14111328125,
+                "Internal solid infill": 2310.158447265625,
+                "Outer wall": 3611.332763671875,
+                "Overhang wall": 100.80751037597656,
+                "Sparse infill": 1722.192138671875,
+                "Top surface": 1729.058837890625,
+                "Travel": 2579.581298828125,
+                "Undefined": 2563.054443359375
+            },
+            "filament_change_times": 0,
+            "filaments": [
+                {
+                    "filament_id": "GFA00",
+                    "id": 1,
+                    "main_used_g": 348.1075134277344,
+                    "total_used_g": 348.1075134277344
+                }
+            ],
+            "generate_support_material_time": 189,
+            "id": 2,
+            "infill_time": 669,
+            "layer_filament_change": 0,
+            "main_predication": 19803.552734375,
+            "make_perimeters_time": 857,
+            "obj_cached_cnt": 0,
+            "objects": [
+                {
+                    "bbox": {
+                        "depth": 61.79235076904297,
+                        "height": 28.25,
+                        "width": 64.7251205444336,
+                        "x": 468.4991760253906,
+                        "y": 169.00808715820313,
+                        "z": 0.0
+                    },
+                    "id": 470,
+                    "name": "cloth-5-way.stl_5",
+                    "triangle_count": 24230
+                },
+                {
+                    "bbox": {
+                        "depth": 61.79233932495117,
+                        "height": 28.25,
+                        "width": 64.72511291503906,
+                        "x": 402.6561584472656,
+                        "y": 169.00808715820313,
+                        "z": 0.0
+                    },
+                    "id": 481,
+                    "name": "cloth-5-way.stl_6",
+                    "triangle_count": 24230
+                },
+                {
+                    "bbox": {
+                        "depth": 50.201045989990234,
+                        "height": 28.25,
+                        "width": 64.07081604003906,
+                        "x": 469.16204833984375,
+                        "y": 116.8255615234375,
+                        "z": 0.0
+                    },
+                    "id": 547,
+                    "name": "cloth-4-way-B.stl_1",
+                    "triangle_count": 22348
+                },
+                {
+                    "bbox": {
+                        "depth": 50.201045989990234,
+                        "height": 28.25,
+                        "width": 64.07083129882813,
+                        "x": 404.1962585449219,
+                        "y": 116.8255615234375,
+                        "z": 0.0
+                    },
+                    "id": 558,
+                    "name": "cloth-4-way-B.stl_2",
+                    "triangle_count": 22348
+                },
+                {
+                    "bbox": {
+                        "depth": 50.20104217529297,
+                        "height": 28.25,
+                        "width": 64.07081604003906,
+                        "x": 469.16204833984375,
+                        "y": 70.9961929321289,
+                        "z": 0.0
+                    },
+                    "id": 569,
+                    "name": "cloth-4-way-B.stl_3",
+                    "triangle_count": 22348
+                },
+                {
+                    "bbox": {
+                        "depth": 50.20104217529297,
+                        "height": 28.25,
+                        "width": 64.07083129882813,
+                        "x": 404.1962585449219,
+                        "y": 70.9961929321289,
+                        "z": 0.0
+                    },
+                    "id": 580,
+                    "name": "cloth-4-way-B.stl_4",
+                    "triangle_count": 22348
+                },
+                {
+                    "bbox": {
+                        "depth": 50.20104217529297,
+                        "height": 28.25,
+                        "width": 64.07081604003906,
+                        "x": 469.16204833984375,
+                        "y": 25.16682243347168,
+                        "z": 0.0
+                    },
+                    "id": 591,
+                    "name": "cloth-4-way-B.stl_5",
+                    "triangle_count": 22348
+                },
+                {
+                    "bbox": {
+                        "depth": 83.38324737548828,
+                        "height": 28.25,
+                        "width": 83.38325500488281,
+                        "x": 395.5255126953125,
+                        "y": 4.391382217407227,
+                        "z": 0.0
+                    },
+                    "id": 492,
+                    "name": "cloth-4-way-A.stl_1",
+                    "triangle_count": 21844
+                },
+                {
+                    "bbox": {
+                        "depth": 83.38323974609375,
+                        "height": 28.25,
+                        "width": 83.38325500488281,
+                        "x": 331.78875732421875,
+                        "y": 91.77054595947266,
+                        "z": 0.0
+                    },
+                    "id": 503,
+                    "name": "cloth-4-way-A.stl_2",
+                    "triangle_count": 21844
+                },
+                {
+                    "bbox": {
+                        "depth": 83.38323974609375,
+                        "height": 28.25,
+                        "width": 83.38325500488281,
+                        "x": 331.78875732421875,
+                        "y": 136.6215362548828,
+                        "z": 0.0
+                    },
+                    "id": 514,
+                    "name": "cloth-4-way-A.stl_3",
+                    "triangle_count": 21844
+                },
+                {
+                    "bbox": {
+                        "depth": 83.38324737548828,
+                        "height": 28.25,
+                        "width": 83.38325500488281,
+                        "x": 331.42913818359375,
+                        "y": 46.98141098022461,
+                        "z": 0.0
+                    },
+                    "id": 525,
+                    "name": "cloth-4-way-A.stl_4",
+                    "triangle_count": 21844
+                },
+                {
+                    "bbox": {
+                        "depth": 83.38324737548828,
+                        "height": 28.25,
+                        "width": 83.38323974609375,
+                        "x": 329.6420593261719,
+                        "y": 2.4568424224853516,
+                        "z": 0.0
+                    },
+                    "id": 536,
+                    "name": "cloth-4-way-A.stl_5",
+                    "triangle_count": 21844
+                }
+            ],
+            "sliced_time": 8720,
+            "sliced_time_with_cache": 6588,
+            "total_predication": 20202.330078125,
+            "triangle_count": 269420,
+            "warning_message": ""
+        }
+    ],
+    "sparse_infill_density": 15.0,
+    "wall_loops": 3
+}

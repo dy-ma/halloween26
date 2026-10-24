@@ -1,0 +1,16 @@
+[
+  {
+    "model": "rib-6-way",
+    "material": "pla-matte",
+    "supports": false,
+    "layer_height_mm": 0.56,
+    "gcode_summary": [
+      "; model printing time: 33m 11s; total estimated time: 39m 24s",
+      "; total filament length [mm] : 11332.74",
+      "; total filament volume [cm^3] : 27258.44",
+      "; total filament weight [g] : 35.98"
+    ],
+    "model_time": "33m 11s",
+    "filament_g": 35.98
+  }
+]

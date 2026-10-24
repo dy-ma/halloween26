@@ -1,11 +1,6 @@
 use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    process::ExitCode,
-    str::FromStr,
-    sync::Arc,
-    thread::JoinHandle,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    collections::BTreeMap, path::PathBuf, process::ExitCode, str::FromStr, sync::Arc,
+    thread::JoinHandle, time::Duration,
 };
 
 macro_rules! fx_log {
@@ -16,12 +11,17 @@ macro_rules! fx_log {
 pub(crate) use fx_log;
 
 mod aliases;
+mod audio_runtime;
+mod cue_link;
+mod display_registry;
 mod kiosk;
 mod logging;
+mod mqtt_input;
 mod screen;
 mod serial_input;
 mod show_config;
 mod web;
+mod workflow;
 
 use aliases::DeviceAliases;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -315,15 +315,15 @@ struct EventMapping {
 struct RuntimeNode {
     id: String,
     at_ms: u64,
+    after: Vec<String>,
     action: RuntimeAction,
 }
 
 #[derive(Clone)]
 enum RuntimeAction {
     Audio {
-        file: PathBuf,
+        track: String,
         sink: String,
-        device: DeviceSelector,
         volume: Option<f32>,
     },
     Screen {
@@ -334,10 +334,308 @@ enum RuntimeAction {
     },
     Cue {
         sink: String,
-        sender: serial_input::CueLinkSender,
+        link: String,
+        sender: cue_link::CueLinkSender,
+        target: String,
         cue: String,
         expires_after_ms: u64,
+        wait_for: Option<String>,
+        timeout_ms: u64,
     },
+}
+
+#[derive(Clone)]
+struct RuntimeControl {
+    press: Vec<RuntimeNode>,
+    release: Vec<RuntimeNode>,
+}
+
+#[derive(Clone)]
+struct DcProfileTarget {
+    sink: String,
+    link: String,
+    sender: cue_link::CueLinkSender,
+    target: String,
+}
+
+const MIN_TUNABLE_STEPPER_RPM: u16 = 10;
+const MAX_TUNABLE_STEPPER_RPM: u16 = 120;
+
+fn pwm_percent_to_duty(percent: u8) -> u8 {
+    ((u16::from(percent) * 255 + 50) / 100) as u8
+}
+
+fn dc_profile_nodes(
+    profile: &web::DcProfileInput,
+    target: &DcProfileTarget,
+    screen_hub: &ScreenHub,
+) -> std::result::Result<Vec<RuntimeNode>, String> {
+    if !profile.motor_enabled
+        && profile.audio.is_none()
+        && profile.eye.is_none()
+        && profile.stepper.is_none()
+    {
+        return Err("select at least one playback component".into());
+    }
+    if profile.motor_enabled
+        && (profile.peak_pwm_percent == 0
+            || profile.peak_pwm_percent > 100
+            || profile.minimum_pwm_percent > profile.peak_pwm_percent
+            || !(50..=9999).contains(&profile.ramp_ms)
+            || profile.hold_ms > 9999
+            || !(50..=9999).contains(&profile.fade_ms))
+    {
+        return Err("invalid DC profile: PWM must be 1–100%, minimum must not exceed peak, and ramp/fade must be 50–9999 ms".into());
+    }
+    let duration_ms =
+        u64::from(profile.ramp_ms) + u64::from(profile.hold_ms) + u64::from(profile.fade_ms);
+    if profile.motor_enabled && duration_ms > 20_000 {
+        return Err("DC profile duration must not exceed 20 seconds".into());
+    }
+    let (direction, direction_name) = match profile.direction {
+        web::DcDirection::Forward => ('f', "forward"),
+        web::DcDirection::Reverse => ('r', "reverse"),
+    };
+    let cue = format!(
+        "dc:c:{direction}:{}:{}:{}:{}:{}",
+        pwm_percent_to_duty(profile.peak_pwm_percent),
+        pwm_percent_to_duty(profile.minimum_pwm_percent),
+        profile.ramp_ms,
+        profile.hold_ms,
+        profile.fade_ms,
+    );
+    if profile.motor_enabled && cue.len() > 31 {
+        return Err("DC profile does not fit the Cue packet".into());
+    }
+    // The common Play timeline does not shift when audio is unchecked. Keep
+    // accepting the old audio-nested offset for already-open dashboard clients.
+    let motor_delay_ms = profile.motor_delay_ms.unwrap_or_else(|| {
+        profile
+            .audio
+            .as_ref()
+            .map_or(0, |audio| audio.motor_delay_ms)
+    });
+    if profile.motor_enabled && motor_delay_ms > 10_000 {
+        return Err("motor audio offset must not exceed 10 seconds".into());
+    }
+    let mut nodes = Vec::with_capacity(if profile.audio.is_some() { 2 } else { 1 });
+    if let Some(audio) = &profile.audio {
+        if audio.track.is_empty()
+            || audio.track.len() > 128
+            || audio.output.is_empty()
+            || audio.output.len() > 128
+        {
+            return Err("audio track and output must be valid bounded identifiers".into());
+        }
+        nodes.push(RuntimeNode {
+            id: format!("tune/{}/audio", target.sink),
+            at_ms: 0,
+            after: Vec::new(),
+            action: RuntimeAction::Audio {
+                track: audio.track.clone(),
+                sink: audio.output.clone(),
+                volume: None,
+            },
+        });
+    }
+    if profile.motor_enabled {
+        nodes.push(RuntimeNode {
+            id: format!("tune/{}/motor", target.sink),
+            at_ms: u64::from(motor_delay_ms),
+            after: Vec::new(),
+            action: RuntimeAction::Cue {
+                sink: target.sink.clone(),
+                link: target.link.clone(),
+                sender: target.sender.clone(),
+                target: target.target.clone(),
+                cue,
+                expires_after_ms: 1000,
+                wait_for: None,
+                timeout_ms: duration_ms + 2000,
+            },
+        });
+    }
+    if let Some(eye) = &profile.eye {
+        if eye.device_id.is_empty() || eye.device_id.len() > 128 || eye.wake_delay_ms > 10_000 {
+            return Err(
+                "eye device must be a saved display ID and wake delay must be 0–10000 ms".into(),
+            );
+        }
+        // Resolve a saved identity against current connections on every run.
+        // A reconnect does not change the user's selected display, and unrelated
+        // displays must never receive this private Wake.
+        let clients: Vec<_> = screen_hub
+            .statuses()
+            .into_iter()
+            .flat_map(|screen| screen.clients)
+            .filter(|client| {
+                client.client_id == eye.device_id && screen_hub.client_alive(&client.connection_id)
+            })
+            .collect();
+        if clients.is_empty() {
+            return Err("selected eye display is offline; no part of the run was scheduled".into());
+        }
+        for client in clients {
+            let id = format!("client/{}/wake", client.connection_id);
+            let mut control = live_display_control(&id, screen_hub)
+                .ok_or_else(|| "selected eye disconnected before scheduling".to_string())?;
+            let mut node = control.press.remove(0);
+            node.id = format!("tune/{}/eye/{}", target.sink, client.connection_id);
+            node.at_ms = u64::from(eye.wake_delay_ms);
+            nodes.push(node);
+        }
+    }
+    fx_log!(
+        "prepared DC {direction_name} profile for `{}`: peak={}%, minimum={}%, ramp={}ms, hold={}ms, fade={}ms, motor delay={}ms",
+        target.sink,
+        profile.peak_pwm_percent,
+        profile.minimum_pwm_percent,
+        profile.ramp_ms,
+        profile.hold_ms,
+        profile.fade_ms,
+        motor_delay_ms,
+    );
+    Ok(nodes)
+}
+
+fn playback_nodes(
+    profile: &web::DcProfileInput,
+    target: &DcProfileTarget,
+    screen_hub: &ScreenHub,
+    controls: &BTreeMap<String, RuntimeControl>,
+) -> std::result::Result<Vec<RuntimeNode>, String> {
+    let mut nodes = dc_profile_nodes(profile, target, screen_hub)?;
+    if let Some(stepper) = &profile.stepper {
+        if stepper.delay_ms > 10_000 {
+            return Err("stepper delay must be 0–10000 ms".into());
+        }
+        let control = controls
+            .get(&stepper.control)
+            .filter(|control| control.rpm().is_some())
+            .ok_or_else(|| "select a configured finite stepper stroke".to_string())?;
+        // Reuse the configured stroke, including direction, pulse count, target,
+        // transport and expiry. Only peak RPM and start offset are tunable here.
+        let mut stroke = control.nodes_for(web::ControlPhase::Press, None, Some(stepper.rpm))?;
+        stroke[0].id = format!("tune/{}/stepper", stepper.control);
+        stroke[0].at_ms = u64::from(stepper.delay_ms);
+        nodes.extend(stroke);
+    }
+    Ok(nodes)
+}
+
+/// Only the existing, leased DC jog protocol may receive a PWM override.
+fn dc_jog_pwm(cue: &str) -> Option<u8> {
+    let rest = cue.strip_prefix("dc:jog:")?;
+    let (direction, duty) = rest.split_once(':')?;
+    if !matches!(direction, "fwd" | "rev") || !duty.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    duty.parse::<u8>().ok().filter(|value| *value > 0)
+}
+
+/// Return the configured RPM only for an exact finite stepper cue.
+fn finite_stepper_rpm(cue: &str) -> Option<u16> {
+    let mut parts = cue.split(':');
+    if parts.next()? != "step" || !matches!(parts.next()?, "fwd" | "rev") {
+        return None;
+    }
+    let steps = parts.next()?;
+    let rpm = parts.next()?;
+    if parts.next().is_some()
+        || !steps.bytes().all(|byte| byte.is_ascii_digit())
+        || !rpm.bytes().all(|byte| byte.is_ascii_digit())
+        || steps.parse::<u32>().ok()? == 0
+    {
+        return None;
+    }
+    rpm.parse::<u16>().ok().filter(|value| *value > 0)
+}
+
+impl RuntimeControl {
+    fn pwm(&self) -> Option<u8> {
+        let [press] = self.press.as_slice() else {
+            return None;
+        };
+        let [release] = self.release.as_slice() else {
+            return None;
+        };
+        if !matches!(&release.action, RuntimeAction::Cue { cue, .. } if cue == "dc:stop") {
+            return None;
+        }
+        match &press.action {
+            RuntimeAction::Cue { cue, .. } => dc_jog_pwm(cue),
+            _ => None,
+        }
+    }
+
+    fn rpm(&self) -> Option<u16> {
+        let [press] = self.press.as_slice() else {
+            return None;
+        };
+        if !self.release.is_empty() {
+            return None;
+        }
+        match &press.action {
+            RuntimeAction::Cue { cue, .. } => finite_stepper_rpm(cue),
+            _ => None,
+        }
+    }
+
+    fn stroke_steps(&self) -> Option<u32> {
+        self.rpm()?;
+        match &self.press[0].action {
+            RuntimeAction::Cue { cue, .. } => cue.split(':').nth(2)?.parse().ok(),
+            _ => None,
+        }
+    }
+
+    fn nodes_for(
+        &self,
+        phase: web::ControlPhase,
+        pwm: Option<u8>,
+        rpm: Option<u16>,
+    ) -> std::result::Result<Vec<RuntimeNode>, String> {
+        let nodes = match phase {
+            web::ControlPhase::Press => &self.press,
+            web::ControlPhase::Release => &self.release,
+        };
+        if nodes.is_empty() {
+            return Err("control does not support this phase".into());
+        }
+        let mut nodes = nodes.clone();
+        if pwm.is_some() && rpm.is_some() {
+            return Err("a control request cannot override both PWM and RPM".into());
+        }
+        if let Some(pwm) = pwm {
+            if pwm == 0 || self.pwm().is_none() || !matches!(phase, web::ControlPhase::Press) {
+                return Err("PWM must be 1–255 and is only supported on DC jog presses".into());
+            }
+            if let RuntimeAction::Cue { cue, .. } = &mut nodes[0].action {
+                let (prefix, _) = cue.rsplit_once(':').expect("validated DC jog cue");
+                *cue = format!("{prefix}:{pwm}");
+            }
+        }
+        if let Some(rpm) = rpm {
+            if !(MIN_TUNABLE_STEPPER_RPM..=MAX_TUNABLE_STEPPER_RPM).contains(&rpm)
+                || self.rpm().is_none()
+                || !matches!(phase, web::ControlPhase::Press)
+            {
+                return Err(format!(
+                    "RPM must be {MIN_TUNABLE_STEPPER_RPM}–{MAX_TUNABLE_STEPPER_RPM} and is only supported on finite stepper presses"
+                ));
+            }
+            if let RuntimeAction::Cue { cue, .. } = &mut nodes[0].action {
+                let (prefix, _) = cue.rsplit_once(':').expect("validated finite stepper cue");
+                *cue = format!("{prefix}:{rpm}");
+            }
+        }
+        Ok(nodes)
+    }
+}
+
+struct CompiledFlows {
+    by_trigger: BTreeMap<(String, String), Vec<RuntimeNode>>,
+    by_name: BTreeMap<String, Vec<RuntimeNode>>,
 }
 
 #[derive(Debug, Clone)]
@@ -487,13 +785,24 @@ fn print_show_summary(path: &std::path::Path, show: &show_config::ShowConfig) {
     println!("config: {}", path.display());
     println!("links:");
     for (name, link) in &show.links {
-        let (port, baud) = link.serial();
-        println!(
-            "  {name}: serial-cue {} at {baud} baud",
-            port.as_ref()
-                .map(|port| port.display().to_string())
-                .unwrap_or_else(|| "(auto)".into())
-        );
+        match link {
+            show_config::LinkConfig::SerialCue { port, baud } => println!(
+                "  {name}: serial-cue {} at {baud} baud",
+                port.as_ref()
+                    .map(|port| port.display().to_string())
+                    .unwrap_or_else(|| "(auto)".into())
+            ),
+            show_config::LinkConfig::MqttCue {
+                host,
+                port,
+                node,
+                topic_prefix,
+                ..
+            } => println!("  {name}: mqtt-cue {host}:{port} as {node} under `{topic_prefix}`"),
+            show_config::LinkConfig::SimulatedCue => {
+                println!("  {name}: simulated-cue")
+            }
+        }
     }
     println!("sources:");
     for (name, source) in &show.sources {
@@ -516,9 +825,11 @@ fn print_show_summary(path: &std::path::Path, show: &show_config::ShowConfig) {
                 println!("  {name}: screen -> {screen_id}");
             }
             show_config::SinkConfig::Cue {
-                link, namespace, ..
+                link,
+                target,
+                namespace,
             } => {
-                println!("  {name}: cue -> {link} namespace `{namespace}`");
+                println!("  {name}: cue -> {target} via {link} namespace `{namespace}`");
             }
         }
     }
@@ -662,38 +973,287 @@ async fn run_show(
     logging::init(&log_file)?;
 
     let (event_sender, mut events) = tokio::sync::mpsc::channel(128);
+    let boards = web::BoardRegistry::default();
+    let workflows = workflow::WorkflowHub::default();
+    let audio_slots = Arc::new(Semaphore::new(show.playback.max_active));
+    let audio_runtime = audio_runtime::AudioRuntime::new(&show, Arc::clone(&audio_slots))?;
+    workflows.set_audio(audio_runtime.clone());
     let mut cue_senders = BTreeMap::new();
     for (link_name, link) in &show.links {
-        let (port, baud) = link.serial();
-        let (mut incoming, outgoing) =
-            serial_input::spawn_reconnecting_link(link_name.clone(), port, baud, 128);
-        cue_senders.insert(link_name.clone(), outgoing);
-        let event_sender = event_sender.clone();
-        tokio::spawn(async move {
-            while let Some(event) = incoming.recv().await {
-                if event_sender.send(event).await.is_err() {
-                    break;
-                }
+        let incoming_and_outgoing = match link {
+            show_config::LinkConfig::SerialCue { port, baud } => Some(
+                serial_input::spawn_reconnecting_link(link_name.clone(), port.clone(), *baud, 128),
+            ),
+            show_config::LinkConfig::MqttCue {
+                host,
+                port,
+                node,
+                client_id,
+                topic_prefix,
+                username,
+                password_env,
+            } => Some(mqtt_input::spawn_reconnecting_link(
+                link_name.clone(),
+                mqtt_input::MqttLinkConfig {
+                    host: host.clone(),
+                    port: *port,
+                    node: node.clone(),
+                    client_id: client_id.clone(),
+                    topic_prefix: topic_prefix.clone(),
+                    username: username.clone(),
+                    password_env: password_env.clone(),
+                },
+                128,
+            )),
+            show_config::LinkConfig::SimulatedCue => {
+                cue_senders.insert(
+                    link_name.clone(),
+                    cue_link::spawn_simulated_link(link_name.clone(), 128),
+                );
+                None
             }
-        });
+        };
+        if let Some((mut incoming, outgoing)) = incoming_and_outgoing {
+            cue_senders.insert(link_name.clone(), outgoing);
+            let event_sender = event_sender.clone();
+            tokio::spawn(async move {
+                while let Some(event) = incoming.recv().await {
+                    if event_sender.send(event).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
     }
-    drop(event_sender);
+    for (sink_name, sink) in &show.sinks {
+        if let show_config::SinkConfig::Cue { link, target, .. } = sink
+            && show.links[link].is_simulated()
+        {
+            boards.record(link, target, sink_name, "simulated", None);
+        }
+    }
 
     let flows = compile_flows(&show, &cue_senders)?;
+    let mut controls = compile_controls(&show, &cue_senders, &flows.by_name)?;
+    let mut dc_profile_targets = BTreeMap::new();
+    for (id, control) in &show.controls {
+        if controls.get(id).and_then(RuntimeControl::pwm).is_none() {
+            continue;
+        }
+        let show_config::ControlConfig::Cue { sink, .. } = control else {
+            continue;
+        };
+        let show_config::SinkConfig::Cue { link, target, .. } = &show.sinks[sink] else {
+            continue;
+        };
+        dc_profile_targets
+            .entry(sink.clone())
+            .or_insert_with(|| DcProfileTarget {
+                sink: sink.clone(),
+                link: link.clone(),
+                sender: cue_senders[link].clone(),
+                target: target.clone(),
+            });
+    }
+    let (control_sender, mut control_requests) = tokio::sync::mpsc::channel(64);
+    let volume_devices: BTreeMap<String, String> = show
+        .sinks
+        .iter()
+        .filter_map(|(id, sink)| match sink {
+            show_config::SinkConfig::Audio { device, .. } => Some((id.clone(), device.clone())),
+            _ => None,
+        })
+        .collect();
+    let (volume_sender, mut volume_requests) = tokio::sync::mpsc::channel(16);
+    let reload_available = std::env::var_os("INVOCATION_ID").is_some();
+    let (reload_sender, mut reload_requests) = tokio::sync::mpsc::channel(1);
+    let volume_audio = PipeWire::default();
+    let mut control_manifest = web::ControlManifest {
+        show: show.name.clone(),
+        runtime_instance: std::process::id(),
+        reload_available,
+        controls: show
+            .controls
+            .iter()
+            .map(|(id, control)| match control {
+                show_config::ControlConfig::Flow {
+                    label,
+                    key,
+                    panel,
+                    section,
+                    ..
+                } => web::ControlDefinition {
+                    id: id.clone(),
+                    label: label.clone(),
+                    kind: "flow",
+                    repeat_ms: None,
+                    pwm: None,
+                    rpm: None,
+                    stroke_steps: None,
+                    stroke_profile: None,
+                    key: key.clone(),
+                    group: None,
+                    panel: panel.clone().unwrap_or_else(|| "show".into()),
+                    target: None,
+                    section: section.map_or("show", show_config::ControlSection::as_str),
+                },
+                show_config::ControlConfig::Cue {
+                    label,
+                    sink,
+                    repeat_ms,
+                    key,
+                    panel,
+                    section,
+                    ..
+                } => {
+                    let target = match &show.sinks[sink] {
+                        show_config::SinkConfig::Cue { target, .. } => Some(target.clone()),
+                        _ => None,
+                    };
+                    web::ControlDefinition {
+                        id: id.clone(),
+                        label: label.clone(),
+                        kind: if repeat_ms.is_some() { "hold" } else { "cue" },
+                        repeat_ms: *repeat_ms,
+                        pwm: repeat_ms.and_then(|_| controls[id].pwm()),
+                        rpm: repeat_ms.is_none().then(|| controls[id].rpm()).flatten(),
+                        stroke_steps: controls[id].stroke_steps(),
+                        stroke_profile: controls[id].rpm().and_then(|_| match &show.sinks[sink] {
+                            show_config::SinkConfig::Cue { link, .. }
+                                if matches!(
+                                    show.links[link],
+                                    show_config::LinkConfig::MqttCue { .. }
+                                        | show_config::LinkConfig::SimulatedCue
+                                ) =>
+                            {
+                                Some("quintic")
+                            }
+                            _ => None,
+                        }),
+                        key: key.clone(),
+                        group: Some(sink.clone()),
+                        panel: panel.clone().unwrap_or_else(|| sink.clone()),
+                        target,
+                        section: section.map_or("bench", show_config::ControlSection::as_str),
+                    }
+                }
+            })
+            .collect(),
+        audio_outputs: show
+            .sinks
+            .iter()
+            .filter_map(|(id, sink)| match sink {
+                show_config::SinkConfig::Audio { .. } => {
+                    Some(web::AudioOutputDefinition { id: id.clone() })
+                }
+                _ => None,
+            })
+            .collect(),
+    };
+    for sink in show.sinks.values() {
+        let show_config::SinkConfig::Screen { screen_id, .. } = sink else {
+            continue;
+        };
+        for (operation, command, final_state) in [
+            (
+                "wake",
+                screen::EyeCommand::Wake,
+                screen::EyeSnapshot {
+                    mode: screen::EyeMode::Tipping,
+                    gaze: screen::Gaze { x: -0.25, y: -0.65 },
+                },
+            ),
+            (
+                "reset",
+                screen::EyeCommand::Reset,
+                screen::EyeSnapshot {
+                    mode: screen::EyeMode::Sleeping,
+                    gaze: screen::Gaze { x: 0.0, y: 0.0 },
+                },
+            ),
+        ] {
+            let id = format!("display/{screen_id}/{operation}");
+            // Keep legacy control IDs callable, but show only the canonical pair.
+            // Only collapse a pure, immediate bench action for this exact role;
+            // custom sequences and remote-triggered flows remain untouched.
+            let aliases: Vec<_> = control_manifest
+                .controls
+                .iter()
+                .filter(|definition| {
+                    definition.section == "bench"
+                        && definition.panel == *screen_id
+                        && controls.get(&definition.id).is_some_and(|control| {
+                            is_display_alias(control, screen_id, &command, &final_state)
+                        })
+                })
+                .map(|definition| (definition.id.clone(), definition.key.clone()))
+                .collect();
+            let key = aliases.iter().find_map(|(_, key)| key.clone());
+            control_manifest
+                .controls
+                .retain(|definition| !aliases.iter().any(|(id, _)| *id == definition.id));
+            if controls.contains_key(&id) {
+                return Err(fx_audio::FxError::ShowConfig(format!(
+                    "reserved display control: {id}"
+                )));
+            }
+            controls.insert(
+                id.clone(),
+                RuntimeControl {
+                    press: vec![RuntimeNode {
+                        id: id.clone(),
+                        after: Vec::new(),
+                        at_ms: 0,
+                        action: RuntimeAction::Screen {
+                            screen_id: screen_id.clone(),
+                            command,
+                            final_state,
+                            expires_after_ms: 2000,
+                        },
+                    }],
+                    release: Vec::new(),
+                },
+            );
+            control_manifest.controls.push(web::ControlDefinition {
+                id,
+                label: if operation == "wake" { "Wake" } else { "Reset" }.into(),
+                kind: "flow",
+                repeat_ms: None,
+                pwm: None,
+                rpm: None,
+                stroke_steps: None,
+                stroke_profile: None,
+                key,
+                group: None,
+                panel: screen_id.clone(),
+                target: None,
+                section: "bench",
+            });
+        }
+    }
     let screen_hub = ScreenHub::new(show.sinks.values().filter_map(|sink| match sink {
         show_config::SinkConfig::Screen {
             screen_id,
             initial_state,
         } => Some((screen_id.clone(), initial_state.clone())),
         _ => None,
-    }));
+    }))
+    .with_registry(display_registry::DisplayRegistry::load_default()?);
     let (server_result_tx, mut server_result_rx) = tokio::sync::mpsc::channel(1);
     let server_started = show.server.is_some();
     if let Some(server) = show.server.clone() {
         let bind = server.socket_addr()?;
         let hub = screen_hub.clone();
+        let control = web::ControlState {
+            manifest: control_manifest,
+            sender: control_sender,
+            volume_sender,
+            reload_sender: reload_available.then_some(reload_sender),
+            boards: boards.clone(),
+            workflows: workflows.clone(),
+        };
         tokio::spawn(async move {
-            let result = web::serve(bind, server.static_dir, server.screen_id, hub).await;
+            let result = web::serve(bind, server.static_dir, server.screen_id, hub, control).await;
             let _ = server_result_tx.send(result).await;
         });
     }
@@ -717,8 +1277,7 @@ async fn run_show(
     };
     let mut kiosk_check = tokio::time::interval(Duration::from_secs(1));
 
-    let mut deduper = serial_input::EventDeduper::new(show.playback.dedupe_capacity);
-    let audio_slots = Arc::new(Semaphore::new(show.playback.max_active));
+    let mut deduper = cue_link::EventDeduper::new(show.playback.dedupe_capacity);
 
     fx_log!(
         "running show `{}` from {}; fx logs: {}",
@@ -732,16 +1291,121 @@ async fn run_show(
                 let Some(message) = message else {
                     return Err(fx_audio::FxError::Serial("serial owner stopped".into()));
                 };
+                if message.event == "system:peer" {
+                    if let (Some(link), Some(node), Some(service), Some(transport)) = (
+                        message.link.as_deref(),
+                        message.source.as_deref(),
+                        message.service.as_deref(),
+                        message.transport.as_deref(),
+                    ) {
+                        boards.record(link, node, service, transport, message.rssi);
+                    }
+                    continue;
+                }
                 if deduper.is_duplicate(&message) {
                     fx_log!("deduped event `{}` sequence {:?}", message.event, message.sequence);
                     continue;
                 }
+                workflows.record(&message);
+                if message.event == "show:stop" { workflows.cancel_pending(); audio_runtime.stop_all(); }
                 dispatch_show_event(
                     &message,
-                    &flows,
+                    &flows.by_trigger,
                     &screen_hub,
                     Arc::clone(&audio_slots),
+                    &workflows,
                 );
+            }
+            request = control_requests.recv() => {
+                let Some(request) = request else { continue };
+                let result = if let Some(profile) = request.dc_profile.as_ref() {
+                    if !matches!(request.phase, web::ControlPhase::Press)
+                        || request.pwm.is_some()
+                        || request.rpm.is_some()
+                    {
+                        Err("DC profiles only support a parameterized press".into())
+                    } else {
+                        dc_profile_targets.get(&request.id).ok_or_else(|| {
+                            format!("unknown tunable DC sink `{}`", request.id)
+                        }).and_then(|target| {
+                            let nodes = playback_nodes(profile, target, &screen_hub, &controls)?;
+                            schedule_nodes(
+                                &nodes,
+                                &screen_hub,
+                                Arc::clone(&audio_slots),
+                                &format!("DC profile `{}`", request.id),
+                                &workflows,
+                            )
+                        })
+                    }
+                } else {
+                    let live_control = live_display_control(&request.id, &screen_hub);
+                    controls.get(&request.id).or(live_control.as_ref()).ok_or_else(|| {
+                        format!("unknown control `{}`", request.id)
+                    }).and_then(|control| {
+                        let nodes = control.nodes_for(request.phase, request.pwm, request.rpm)?;
+                        if request.id == "stop_all" { workflows.cancel_pending(); audio_runtime.stop_all(); }
+                        schedule_nodes(
+                            &nodes,
+                            &screen_hub,
+                            Arc::clone(&audio_slots),
+                            &format!("control `{}`", request.id),
+                            &workflows,
+                        )
+                    })
+                };
+                let _ = request.response.send(result);
+            }
+            request = volume_requests.recv() => {
+                let Some(request) = request else { continue };
+                let result = volume_devices.get(&request.id).ok_or_else(|| {
+                    format!("unknown audio output `{}`", request.id)
+                }).and_then(|device| {
+                    let target = resolve_volume_target(&volume_audio, Some(device.clone()))
+                        .map_err(|error| error.to_string())?;
+                    if let Some(percent) = request.percent {
+                        volume_audio
+                            .set_volume_percent(&target, percent)
+                            .map_err(|error| error.to_string())?;
+                        if percent > 0 {
+                            volume_audio
+                                .set_muted(&target, "0")
+                                .map_err(|error| error.to_string())?;
+                        }
+                    }
+                    let volume = volume_audio.volume(&target).map_err(|error| error.to_string())?;
+                    Ok(web::VolumeStatus {
+                        id: request.id.clone(),
+                        percent: (volume.level * 100.0).round().clamp(0.0, 100.0) as u8,
+                        muted: volume.muted,
+                    })
+                });
+                let _ = request.response.send(result);
+            }
+            request = reload_requests.recv(), if reload_available => {
+                let Some(()) = request else { continue };
+                fx_log!("dashboard requested show configuration reload");
+                workflows.cancel_pending();
+                audio_runtime.stop_all();
+                if let Some(control) = controls.get("stop_all") {
+                    match control.nodes_for(web::ControlPhase::Press, None, None)
+                        .and_then(|nodes| schedule_nodes(
+                            &nodes,
+                            &screen_hub,
+                            Arc::clone(&audio_slots),
+                            "show reload safety stop",
+                            &workflows,
+                        )) {
+                        Ok(()) => {}
+                        Err(error) => fx_log!("show reload safety stop failed: {error}"),
+                    }
+                }
+                // Give the accepted HTTP response and safety-stop cues time to
+                // leave this process before its systemd supervisor restarts it.
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                return Err(fx_audio::FxError::Server(
+                    "show configuration reload requested".into(),
+                ));
             }
             server_result = server_result_rx.recv(), if server_started => {
                 return match server_result {
@@ -769,15 +1433,13 @@ async fn run_show(
 
 fn compile_flows(
     show: &show_config::ShowConfig,
-    cue_senders: &BTreeMap<String, serial_input::CueLinkSender>,
-) -> Result<BTreeMap<(String, String), Vec<RuntimeNode>>> {
-    let aliases = DeviceAliases::load_default()?;
+    cue_senders: &BTreeMap<String, cue_link::CueLinkSender>,
+) -> Result<CompiledFlows> {
     let mut compiled = BTreeMap::new();
+    let mut named = BTreeMap::new();
     for (flow_name, flow) in &show.flows {
         let source_link = show.sources[&flow.trigger.source].link().to_string();
-        let nodes = compiled
-            .entry((source_link, flow.trigger.cue.clone()))
-            .or_insert_with(Vec::new);
+        let mut nodes = Vec::new();
         for node in &flow.nodes {
             let action = match &node.action {
                 show_config::ActionConfig::AudioPlay {
@@ -786,16 +1448,15 @@ fn compile_flows(
                     volume,
                 } => {
                     let show_config::SinkConfig::Audio {
-                        device,
                         volume: sink_volume,
+                        ..
                     } = &show.sinks[sink]
                     else {
                         unreachable!("validated audio sink")
                     };
                     RuntimeAction::Audio {
-                        file: show.assets[asset].audio_file().to_path_buf(),
+                        track: asset.clone(),
                         sink: sink.clone(),
-                        device: DeviceSelector::from(aliases.resolve(Some(device.clone()))),
                         volume: volume.or(*sink_volume),
                     }
                 }
@@ -820,27 +1481,157 @@ fn compile_flows(
                     sink,
                     cue,
                     expires_after_ms,
+                    wait_for,
+                    timeout_ms,
                 } => {
                     let show_config::SinkConfig::Cue {
-                        link, namespace, ..
+                        link,
+                        target,
+                        namespace,
                     } = &show.sinks[sink]
                     else {
                         unreachable!("validated cue sink")
                     };
                     RuntimeAction::Cue {
                         sink: sink.clone(),
+                        link: link.clone(),
                         sender: cue_senders[link].clone(),
+                        target: target.clone(),
                         cue: show_config::qualified_cue(namespace, cue),
                         expires_after_ms: *expires_after_ms,
+                        wait_for: wait_for.clone(),
+                        timeout_ms: *timeout_ms,
                     }
                 }
             };
             nodes.push(RuntimeNode {
                 id: format!("{flow_name}/{}", node.id),
                 at_ms: node.at_ms,
+                after: node
+                    .after
+                    .iter()
+                    .map(|id| format!("{flow_name}/{id}"))
+                    .collect(),
                 action,
             });
         }
+        compiled
+            .entry((source_link, flow.trigger.cue.clone()))
+            .or_insert_with(Vec::new)
+            .extend(nodes.clone());
+        named.insert(flow_name.clone(), nodes);
+    }
+    Ok(CompiledFlows {
+        by_trigger: compiled,
+        by_name: named,
+    })
+}
+
+fn is_display_alias(
+    control: &RuntimeControl,
+    screen_id: &str,
+    command: &screen::EyeCommand,
+    final_state: &screen::EyeSnapshot,
+) -> bool {
+    control.release.is_empty()
+        && control.press.len() == 1
+        && control.press[0].at_ms == 0
+        && control.press[0].after.is_empty()
+        && matches!(&control.press[0].action, RuntimeAction::Screen {
+            screen_id: target, command: action, final_state: state, ..
+        } if target == screen_id && action == command && state == final_state)
+}
+
+fn live_display_control(id: &str, hub: &screen::ScreenHub) -> Option<RuntimeControl> {
+    let (target, operation) = id.strip_prefix("client/")?.rsplit_once('/')?;
+    if !hub.has_client(target) {
+        return None;
+    }
+    let (command, final_state) = match operation {
+        "wake" => (
+            screen::EyeCommand::Wake,
+            screen::EyeSnapshot {
+                mode: screen::EyeMode::Tipping,
+                gaze: screen::Gaze { x: -0.25, y: -0.65 },
+            },
+        ),
+        "reset" => (
+            screen::EyeCommand::Reset,
+            screen::EyeSnapshot {
+                mode: screen::EyeMode::Sleeping,
+                gaze: screen::Gaze { x: 0.0, y: 0.0 },
+            },
+        ),
+        _ => return None,
+    };
+    Some(RuntimeControl {
+        press: vec![RuntimeNode {
+            id: id.into(),
+            at_ms: 0,
+            after: Vec::new(),
+            action: RuntimeAction::Screen {
+                screen_id: target.into(),
+                command,
+                final_state,
+                expires_after_ms: 2000,
+            },
+        }],
+        release: Vec::new(),
+    })
+}
+
+fn compile_controls(
+    show: &show_config::ShowConfig,
+    cue_senders: &BTreeMap<String, cue_link::CueLinkSender>,
+    flows: &BTreeMap<String, Vec<RuntimeNode>>,
+) -> Result<BTreeMap<String, RuntimeControl>> {
+    let mut compiled = BTreeMap::new();
+    for (id, control) in &show.controls {
+        let runtime = match control {
+            show_config::ControlConfig::Flow { flow, .. } => RuntimeControl {
+                press: flows[flow].clone(),
+                release: Vec::new(),
+            },
+            show_config::ControlConfig::Cue {
+                sink,
+                cue,
+                release_cue,
+                expires_after_ms,
+                ..
+            } => {
+                let show_config::SinkConfig::Cue {
+                    link,
+                    target,
+                    namespace,
+                } = &show.sinks[sink]
+                else {
+                    unreachable!("validated cue control")
+                };
+                let make_node = |suffix: &str, cue: &str| RuntimeNode {
+                    id: format!("control/{id}/{suffix}"),
+                    at_ms: 0,
+                    after: Vec::new(),
+                    action: RuntimeAction::Cue {
+                        sink: sink.clone(),
+                        link: link.clone(),
+                        sender: cue_senders[link].clone(),
+                        target: target.clone(),
+                        cue: show_config::qualified_cue(namespace, cue),
+                        expires_after_ms: *expires_after_ms,
+                        wait_for: None,
+                        timeout_ms: 10_000,
+                    },
+                };
+                RuntimeControl {
+                    press: vec![make_node("press", cue)],
+                    release: release_cue
+                        .as_deref()
+                        .map(|cue| vec![make_node("release", cue)])
+                        .unwrap_or_default(),
+                }
+            }
+        };
+        compiled.insert(id.clone(), runtime);
     }
     Ok(compiled)
 }
@@ -858,10 +1649,11 @@ async fn wait_for_server(address: std::net::SocketAddr) -> Result<()> {
 }
 
 fn dispatch_show_event(
-    message: &serial_input::EventMessage,
+    message: &cue_link::EventMessage,
     flows: &BTreeMap<(String, String), Vec<RuntimeNode>>,
     screen_hub: &ScreenHub,
     audio_slots: Arc<Semaphore>,
+    workflows: &workflow::WorkflowHub,
 ) {
     let link = message.link.as_deref().unwrap_or("unknown");
     let nodes = flows
@@ -880,101 +1672,99 @@ fn dispatch_show_event(
         nodes.len()
     );
 
-    for node in nodes {
-        let node = node.clone();
-        let screen_hub = screen_hub.clone();
-        let audio_slots = Arc::clone(&audio_slots);
-        tokio::spawn(async move {
-            if node.at_ms > 0 {
-                tokio::time::sleep(Duration::from_millis(node.at_ms)).await;
-            }
-            execute_node(node, &screen_hub, audio_slots).await;
-        });
+    if let Err(error) = schedule_nodes(
+        nodes,
+        screen_hub,
+        audio_slots,
+        &format!("cue `{}`", message.event),
+        workflows,
+    ) {
+        fx_log!("could not schedule cue: {error}");
     }
 }
 
-async fn execute_node(node: RuntimeNode, screen_hub: &ScreenHub, audio_slots: Arc<Semaphore>) {
+fn schedule_nodes(
+    nodes: &[RuntimeNode],
+    screen_hub: &ScreenHub,
+    audio_slots: Arc<Semaphore>,
+    reason: &str,
+    workflows: &workflow::WorkflowHub,
+) -> std::result::Result<(), String> {
+    fx_log!("{reason}: scheduling {} node(s)", nodes.len());
+    workflows.start(nodes, screen_hub, audio_slots, reason)
+}
+
+async fn execute_node(
+    node: RuntimeNode,
+    screen_hub: &ScreenHub,
+    _audio_slots: Arc<Semaphore>,
+    workflows: &workflow::WorkflowHub,
+) -> std::result::Result<String, String> {
     match node.action {
         RuntimeAction::Audio {
-            file,
+            track,
             sink,
-            device,
             volume,
         } => {
-            let Ok(permit) = audio_slots.try_acquire_owned() else {
-                fx_log!("node `{}` dropped: all playback slots are active", node.id);
-                return;
-            };
-            let request = PlaybackRequest {
-                file: file.clone(),
-                device,
-                options: PlaybackOptions {
-                    volume,
-                    latency: None,
-                },
-            };
-            fx_log!("node `{}` playing {} on `{sink}`", node.id, file.display());
-            let result = tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                PipeWire::default().play(&request)
-            })
-            .await;
-            match result {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => fx_log!("node `{}` playback failed: {error}", node.id),
-                Err(error) => fx_log!("node `{}` playback task failed: {error}", node.id),
-            }
+            let audio = workflows.audio()?;
+            audio
+                .play(&track, &sink, volume, workflows)
+                .await?
+                .wait()
+                .await
         }
         RuntimeAction::Screen {
             screen_id,
             command,
             final_state,
             expires_after_ms,
-        } => publish_screen_action(
-            screen_hub,
-            &node.id,
-            &screen_id,
-            command,
-            final_state,
-            expires_after_ms,
-        ),
+        } => {
+            let receiver = screen_hub.subscribe_applied();
+            let envelope = screen_hub
+                .publish(
+                    &screen_id,
+                    command,
+                    final_state,
+                    workflow::now_ms().saturating_add(expires_after_ms),
+                )
+                .map_err(|e| e.to_string())?;
+            screen_hub
+                .wait_applied(receiver, &screen_id, envelope.seq, expires_after_ms)
+                .await
+        }
         RuntimeAction::Cue {
             sink,
+            link,
             sender,
+            target,
             cue,
             expires_after_ms,
-        } => match sender.try_emit(cue.clone(), Duration::from_millis(expires_after_ms)) {
-            Ok(()) => fx_log!("node `{}` queued cue `{cue}` on `{sink}`", node.id),
-            Err(error) => fx_log!("node `{}` cue action failed: {error}", node.id),
-        },
-    }
-}
-
-fn publish_screen_action(
-    screen_hub: &ScreenHub,
-    node_id: &str,
-    screen_id: &str,
-    command: screen::EyeCommand,
-    final_state: screen::EyeSnapshot,
-    expires_after_ms: u64,
-) {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64;
-    match screen_hub.publish(
-        screen_id,
-        command,
-        final_state,
-        now_ms.saturating_add(expires_after_ms),
-    ) {
-        Ok(envelope) => fx_log!(
-            "node `{node_id}` sent {:?} to `{screen_id}` as screen sequence {}",
-            envelope.command,
-            envelope.seq
-        ),
-        Err(error) => fx_log!("node `{node_id}` screen action failed: {error}"),
+            wait_for,
+            timeout_ms,
+        } => {
+            // Subscribe before dispatch: a fast assembly can report immediately.
+            let receiver = workflows.subscribe();
+            let command_id = sender
+                .try_emit_tracked(
+                    target.clone(),
+                    cue.clone(),
+                    Duration::from_millis(expires_after_ms),
+                )
+                .map_err(|e| e.to_string())?;
+            fx_log!(
+                "node `{}` queued cue `{cue}` for `{target}` on `{sink}` as {command_id:016X}",
+                node.id
+            );
+            match wait_for {
+                Some(event) => {
+                    workflow::wait_for_status(
+                        receiver, &link, &target, command_id, &event, timeout_ms,
+                    )
+                    .await
+                }
+                None => Ok("cue queued".into()),
+            }
+        }
     }
 }
 
@@ -1093,7 +1883,7 @@ fn run_mux_loop(
 
     let port = serial_input::select(connection.port)?;
     let mut lines = serial_input::SerialLines::open(&port, connection.baud)?;
-    let mut deduper = serial_input::EventDeduper::new(dedupe_capacity);
+    let mut deduper = cue_link::EventDeduper::new(dedupe_capacity);
     let mut playbacks: Vec<JoinHandle<()>> = Vec::new();
     let mut matched_events = 0usize;
 
@@ -1380,6 +2170,517 @@ fn print_command_result(output: String) -> Result<()> {
 #[cfg(test)]
 mod cli_tests {
     use super::*;
+
+    fn dc_profile_target() -> DcProfileTarget {
+        let (sender, _receiver) = cue_link::CueLinkSender::channel(8);
+        DcProfileTarget {
+            sink: "dc_a".into(),
+            link: "simulated".into(),
+            sender,
+            target: "00000000000A".into(),
+        }
+    }
+
+    fn dc_control(cue: &str) -> RuntimeControl {
+        let (sender, _receiver) = cue_link::CueLinkSender::channel(8);
+        let node = |cue: &str| RuntimeNode {
+            id: "test".into(),
+            at_ms: 0,
+            after: Vec::new(),
+            action: RuntimeAction::Cue {
+                sink: "dc_a".into(),
+                link: "simulated".into(),
+                sender: sender.clone(),
+                target: "00000000000A".into(),
+                cue: cue.into(),
+                expires_after_ms: 500,
+                wait_for: None,
+                timeout_ms: 1000,
+            },
+        };
+        RuntimeControl {
+            press: vec![node(cue)],
+            release: vec![node("dc:stop")],
+        }
+    }
+
+    #[test]
+    fn pwm_only_changes_dc_jog_duty_preserving_target_direction_and_lease() {
+        for direction in ["fwd", "rev"] {
+            let original = format!("dc:jog:{direction}:255");
+            let control = dc_control(&original);
+            assert_eq!(control.pwm(), Some(255));
+            for duty in [1, 64, 128, 191, 255] {
+                let nodes = control
+                    .nodes_for(web::ControlPhase::Press, Some(duty), None)
+                    .unwrap();
+                assert!(
+                    matches!(&nodes[0].action, RuntimeAction::Cue { cue, target, expires_after_ms, .. }
+                    if cue == &format!("dc:jog:{direction}:{duty}") && target == "00000000000A" && *expires_after_ms == 500)
+                );
+            }
+            let nodes = control
+                .nodes_for(web::ControlPhase::Release, None, None)
+                .unwrap();
+            assert!(matches!(&nodes[0].action, RuntimeAction::Cue { cue, .. } if cue == "dc:stop"));
+            assert!(
+                control
+                    .nodes_for(web::ControlPhase::Press, Some(0), None)
+                    .is_err()
+            );
+            assert!(
+                control
+                    .nodes_for(web::ControlPhase::Release, Some(128), None)
+                    .is_err()
+            );
+            assert!(
+                matches!(&control.press[0].action, RuntimeAction::Cue { cue, .. } if cue == &original)
+            );
+        }
+    }
+
+    #[test]
+    fn pwm_rejects_timed_stepper_malformed_and_non_dc_controls() {
+        for cue in [
+            "dc:fwd:70:500",
+            "step:jog:fwd:30",
+            "dc:stop",
+            "dc:jog:fwd:0",
+            "dc:jog:fwd:256",
+            "dc:jog:side:10",
+            "dc:jog:fwd:10:500",
+            "dc:jog:fwd:+10",
+        ] {
+            let control = dc_control(cue);
+            assert_eq!(control.pwm(), None, "{cue}");
+            assert!(
+                control
+                    .nodes_for(web::ControlPhase::Press, Some(128), None)
+                    .is_err(),
+                "{cue}"
+            );
+        }
+    }
+
+    #[test]
+    fn rpm_only_changes_finite_stepper_speed_within_safe_tuning_range() {
+        let mut control = dc_control("step:rev:1600:60");
+        control.release.clear();
+        assert_eq!(control.rpm(), Some(60));
+        for rpm in [10, 30, 60, 90, 120] {
+            let nodes = control
+                .nodes_for(web::ControlPhase::Press, None, Some(rpm))
+                .unwrap();
+            assert!(matches!(&nodes[0].action,
+                RuntimeAction::Cue { cue, target, .. }
+                if cue == &format!("step:rev:1600:{rpm}") && target == "00000000000A"));
+        }
+        for rpm in [1, 9, 121, 9000] {
+            assert!(
+                control
+                    .nodes_for(web::ControlPhase::Press, None, Some(rpm))
+                    .is_err()
+            );
+        }
+        assert!(
+            control
+                .nodes_for(web::ControlPhase::Press, Some(128), Some(60))
+                .is_err()
+        );
+        assert!(matches!(&control.press[0].action,
+            RuntimeAction::Cue { cue, .. } if cue == "step:rev:1600:60"));
+    }
+
+    #[test]
+    fn rpm_rejects_jogs_releases_and_non_stepper_controls() {
+        for cue in [
+            "step:jog:rev:30",
+            "step:rev:0:60",
+            "step:side:1600:60",
+            "dc:jog:fwd:255",
+        ] {
+            let mut control = dc_control(cue);
+            control.release.clear();
+            assert_eq!(control.rpm(), None, "{cue}");
+            assert!(
+                control
+                    .nodes_for(web::ControlPhase::Press, None, Some(60))
+                    .is_err(),
+                "{cue}"
+            );
+        }
+        let mut control = dc_control("step:fwd:1600:60");
+        control.release.clear();
+        assert!(
+            control
+                .nodes_for(web::ControlPhase::Release, None, Some(60))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dc_profile_builds_smoothed_motor_cue_with_optional_audio_offset() {
+        let profile = web::DcProfileInput {
+            motor_enabled: true,
+            motor_delay_ms: None,
+            direction: web::DcDirection::Forward,
+            peak_pwm_percent: 85,
+            minimum_pwm_percent: 20,
+            ramp_ms: 300,
+            hold_ms: 700,
+            fade_ms: 2200,
+            audio: Some(web::DcProfileAudio {
+                track: "tractor_tip".into(),
+                output: "jbl".into(),
+                motor_delay_ms: 500,
+            }),
+            eye: None,
+            stepper: None,
+        };
+        let nodes = dc_profile_nodes(&profile, &dc_profile_target(), &ScreenHub::new([])).unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert!(matches!(&nodes[0].action,
+            RuntimeAction::Audio { track, sink, .. }
+            if track == "tractor_tip" && sink == "jbl"));
+        assert_eq!(nodes[1].at_ms, 500);
+        assert!(matches!(&nodes[1].action,
+            RuntimeAction::Cue { cue, target, timeout_ms, .. }
+            if cue == "dc:c:f:217:51:300:700:2200"
+                && target == "00000000000A" && *timeout_ms == 5200));
+    }
+
+    #[test]
+    fn dc_profile_schedules_private_wake_by_saved_device_without_retiming_motor() {
+        let hub = ScreenHub::new([(
+            "eye".into(),
+            screen::EyeSnapshot {
+                mode: screen::EyeMode::Sleeping,
+                gaze: screen::Gaze { x: 0.0, y: 0.0 },
+            },
+        )]);
+        let first = hub
+            .register_client("eye", "saved-eye".into(), "Eye".into())
+            .unwrap();
+        let second = hub
+            .register_client("eye", "saved-eye".into(), "Eye".into())
+            .unwrap();
+        let _other = hub
+            .register_client("eye", "other-eye".into(), "Other".into())
+            .unwrap();
+        let profile = web::DcProfileInput {
+            motor_enabled: true,
+            motor_delay_ms: None,
+            direction: web::DcDirection::Forward,
+            peak_pwm_percent: 60,
+            minimum_pwm_percent: 20,
+            ramp_ms: 300,
+            hold_ms: 700,
+            fade_ms: 3500,
+            audio: Some(web::DcProfileAudio {
+                track: "tractor_tip".into(),
+                output: "jbl".into(),
+                motor_delay_ms: 4000,
+            }),
+            eye: Some(web::DcProfileEye {
+                device_id: "saved-eye".into(),
+                wake_delay_ms: 750,
+            }),
+            stepper: None,
+        };
+        let nodes = dc_profile_nodes(&profile, &dc_profile_target(), &hub).unwrap();
+        assert_eq!(nodes.len(), 4);
+        assert_eq!(nodes[0].at_ms, 0);
+        assert_eq!(nodes[1].at_ms, 4000);
+        assert!(matches!(&nodes[1].action, RuntimeAction::Cue { cue, .. }
+            if cue == "dc:c:f:153:51:300:700:3500"));
+        for node in &nodes[2..] {
+            assert_eq!(node.at_ms, 750);
+            assert!(node.after.is_empty());
+            assert!(
+                matches!(&node.action, RuntimeAction::Screen { screen_id, command: screen::EyeCommand::Wake, .. }
+                if screen_id == &first.token || screen_id == &second.token)
+            );
+        }
+        // The selected identity survives new WebSocket tokens.
+        drop(first);
+        drop(second);
+        assert!(dc_profile_nodes(&profile, &dc_profile_target(), &hub).is_err());
+        let reconnected = hub
+            .register_client("eye", "saved-eye".into(), "Eye".into())
+            .unwrap();
+        let nodes = dc_profile_nodes(&profile, &dc_profile_target(), &hub).unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert!(
+            matches!(&nodes[2].action, RuntimeAction::Screen { screen_id, .. } if screen_id == &reconnected.token)
+        );
+        for eye in [
+            web::DcProfileEye {
+                device_id: "".into(),
+                wake_delay_ms: 750,
+            },
+            web::DcProfileEye {
+                device_id: "saved-eye".into(),
+                wake_delay_ms: 10_001,
+            },
+            web::DcProfileEye {
+                device_id: "unknown".into(),
+                wake_delay_ms: 750,
+            },
+        ] {
+            assert!(
+                dc_profile_nodes(
+                    &web::DcProfileInput {
+                        eye: Some(eye),
+                        ..profile.clone()
+                    },
+                    &dc_profile_target(),
+                    &hub
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn dc_profile_play_components_are_independent_and_keep_their_offsets() {
+        let hub = ScreenHub::new([(
+            "eye".into(),
+            screen::EyeSnapshot {
+                mode: screen::EyeMode::Sleeping,
+                gaze: screen::Gaze { x: 0.0, y: 0.0 },
+            },
+        )]);
+        let _client = hub
+            .register_client("eye", "selected-eye".into(), "Eye".into())
+            .unwrap();
+        let mut stroke = dc_control("step:rev:1600:60");
+        stroke.release.clear();
+        assert_eq!(stroke.stroke_steps(), Some(1600));
+        let controls = BTreeMap::from([("stroke".into(), stroke)]);
+        for selection in 0..16 {
+            let motor_enabled = selection & 2 != 0;
+            let profile = web::DcProfileInput {
+                motor_enabled,
+                motor_delay_ms: Some(4000),
+                direction: web::DcDirection::Forward,
+                peak_pwm_percent: 60,
+                minimum_pwm_percent: 20,
+                ramp_ms: 300,
+                hold_ms: 700,
+                fade_ms: 3500,
+                audio: (selection & 1 != 0).then(|| web::DcProfileAudio {
+                    track: "tractor_tip".into(),
+                    output: "speaker".into(),
+                    motor_delay_ms: 0,
+                }),
+                eye: (selection & 4 != 0).then(|| web::DcProfileEye {
+                    device_id: "selected-eye".into(),
+                    wake_delay_ms: 750,
+                }),
+                stepper: (selection & 8 != 0).then(|| web::PlaybackStepper {
+                    control: "stroke".into(),
+                    rpm: 90,
+                    delay_ms: 1500,
+                }),
+            };
+            let result = playback_nodes(&profile, &dc_profile_target(), &hub, &controls);
+            if selection == 0 {
+                assert!(result.is_err());
+                continue;
+            }
+            let nodes = result.unwrap();
+            assert_eq!(nodes.len(), (selection as u32).count_ones() as usize);
+            assert_eq!(
+                nodes
+                    .iter()
+                    .any(|node| matches!(&node.action, RuntimeAction::Cue { cue, .. } if cue.starts_with("dc:"))),
+                motor_enabled
+            );
+            for node in nodes {
+                assert_eq!(
+                    node.at_ms,
+                    match node.action {
+                        RuntimeAction::Audio { .. } => 0,
+                        RuntimeAction::Cue { cue, target, .. } if cue.starts_with("step:") => {
+                            assert_eq!(cue, "step:rev:1600:90");
+                            assert_eq!(target, "00000000000A");
+                            1500
+                        }
+                        RuntimeAction::Cue { .. } => 4000,
+                        RuntimeAction::Screen { .. } => 750,
+                    }
+                );
+            }
+            if !motor_enabled {
+                // Unused motor settings must neither dispatch nor prevent an eye/audio-only trial.
+                let ignored = web::DcProfileInput {
+                    peak_pwm_percent: 0,
+                    fade_ms: 0,
+                    motor_delay_ms: Some(u32::MAX),
+                    ..profile
+                };
+                assert!(playback_nodes(&ignored, &dc_profile_target(), &hub, &controls).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn playback_rejects_unconfigured_strokes_bad_rpm_and_bad_delay_atomically() {
+        let mut stroke = dc_control("step:rev:1600:60");
+        stroke.release.clear();
+        let controls = BTreeMap::from([
+            ("stroke".into(), stroke),
+            ("dc".into(), dc_control("dc:jog:fwd:255")),
+        ]);
+        for stepper in [
+            web::PlaybackStepper {
+                control: "missing".into(),
+                rpm: 60,
+                delay_ms: 500,
+            },
+            web::PlaybackStepper {
+                control: "dc".into(),
+                rpm: 60,
+                delay_ms: 500,
+            },
+            web::PlaybackStepper {
+                control: "stroke".into(),
+                rpm: 9,
+                delay_ms: 500,
+            },
+            web::PlaybackStepper {
+                control: "stroke".into(),
+                rpm: 121,
+                delay_ms: 500,
+            },
+            web::PlaybackStepper {
+                control: "stroke".into(),
+                rpm: 60,
+                delay_ms: 10001,
+            },
+        ] {
+            let profile = web::DcProfileInput {
+                motor_enabled: true,
+                motor_delay_ms: Some(4000),
+                direction: web::DcDirection::Forward,
+                peak_pwm_percent: 60,
+                minimum_pwm_percent: 20,
+                ramp_ms: 300,
+                hold_ms: 700,
+                fade_ms: 3500,
+                audio: None,
+                eye: None,
+                stepper: Some(stepper),
+            };
+            assert!(
+                playback_nodes(
+                    &profile,
+                    &dc_profile_target(),
+                    &ScreenHub::new([]),
+                    &controls
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn dc_profile_rejects_unsafe_or_unrepresentable_parameters() {
+        let base = web::DcProfileInput {
+            motor_enabled: true,
+            motor_delay_ms: None,
+            direction: web::DcDirection::Reverse,
+            peak_pwm_percent: 80,
+            minimum_pwm_percent: 20,
+            ramp_ms: 300,
+            hold_ms: 700,
+            fade_ms: 2200,
+            audio: None,
+            eye: None,
+            stepper: None,
+        };
+        for profile in [
+            web::DcProfileInput {
+                peak_pwm_percent: 0,
+                ..base.clone()
+            },
+            web::DcProfileInput {
+                minimum_pwm_percent: 81,
+                ..base.clone()
+            },
+            web::DcProfileInput {
+                ramp_ms: 49,
+                ..base.clone()
+            },
+            web::DcProfileInput {
+                fade_ms: 10_000,
+                ..base.clone()
+            },
+            web::DcProfileInput {
+                ramp_ms: 9_999,
+                hold_ms: 9_999,
+                fade_ms: 50,
+                ..base.clone()
+            },
+        ] {
+            assert!(dc_profile_nodes(&profile, &dc_profile_target(), &ScreenHub::new([])).is_err());
+        }
+    }
+
+    #[test]
+    fn only_pure_immediate_display_controls_are_collapsed() {
+        let state = screen::EyeSnapshot {
+            mode: screen::EyeMode::Sleeping,
+            gaze: screen::Gaze { x: 0.0, y: 0.0 },
+        };
+        let mut control = RuntimeControl {
+            press: vec![RuntimeNode {
+                id: "legacy-reset".into(),
+                after: Vec::new(),
+                at_ms: 0,
+                action: RuntimeAction::Screen {
+                    screen_id: "eye".into(),
+                    command: screen::EyeCommand::Reset,
+                    final_state: state.clone(),
+                    expires_after_ms: 2000,
+                },
+            }],
+            release: Vec::new(),
+        };
+        assert!(is_display_alias(
+            &control,
+            "eye",
+            &screen::EyeCommand::Reset,
+            &state
+        ));
+        assert!(!is_display_alias(
+            &control,
+            "eye-2",
+            &screen::EyeCommand::Reset,
+            &state
+        ));
+        assert!(!is_display_alias(
+            &control,
+            "eye",
+            &screen::EyeCommand::Wake,
+            &state
+        ));
+        control.press[0].at_ms = 50;
+        assert!(!is_display_alias(
+            &control,
+            "eye",
+            &screen::EyeCommand::Reset,
+            &state
+        ));
+        control.press[0].at_ms = 0;
+        control.press.push(control.press[0].clone());
+        assert!(!is_display_alias(
+            &control,
+            "eye",
+            &screen::EyeCommand::Reset,
+            &state
+        ));
+    }
 
     #[test]
     fn parses_run_config_and_kiosk_override() {

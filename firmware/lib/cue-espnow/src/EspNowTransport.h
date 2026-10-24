@@ -16,14 +16,16 @@ class EspNowTransport final : public Transport {
       uint16_t ack_timeout_ms_value = 70,
       uint16_t max_retry_ms_value = 240,
       uint16_t discovery_interval_ms_value = 1000,
-      bool long_range_value = true
+      bool long_range_value = true,
+      const char *service_name_value = ""
     )
       : channel(channel_value),
         max_attempts(max_attempts_value),
         ack_timeout_ms(ack_timeout_ms_value),
         max_retry_ms(max_retry_ms_value),
         discovery_interval_ms(discovery_interval_ms_value),
-        long_range(long_range_value) {}
+        long_range(long_range_value),
+        service_name(service_name_value) {}
 
     uint8_t channel = 1;
     uint8_t max_attempts = 5;
@@ -31,6 +33,15 @@ class EspNowTransport final : public Transport {
     uint16_t max_retry_ms = 240;
     uint16_t discovery_interval_ms = 1000;
     bool long_range = true;
+    const char *service_name = "";
+  };
+
+  struct PeerInfo {
+    uint64_t node = 0;
+    uint32_t last_seen_ms = 0;
+    bool has_rssi = false;
+    int8_t rssi = 0;
+    char service[kNameCapacity] = {};
   };
 
   EspNowTransport();
@@ -44,6 +55,7 @@ class EspNowTransport final : public Transport {
 
   uint64_t localNode() const { return local_node_; }
   size_t peerCount() const;
+  bool peerAt(size_t index, PeerInfo &peer) const;
   bool firstPeer(uint64_t &node) const;
   bool addPeer(uint64_t node);
 
@@ -68,6 +80,7 @@ class EspNowTransport final : public Transport {
     uint8_t length = 0;
     bool has_rssi = false;
     int8_t rssi = 0;
+    char service[kNameCapacity] = {};
   };
 
   struct SendSlot {
@@ -94,6 +107,7 @@ class EspNowTransport final : public Transport {
     uint32_t last_seen_at = 0;
     bool has_rssi = false;
     int8_t rssi = 0;
+    char service[kNameCapacity] = {};
   };
 
   static EspNowTransport *active_instance_;
@@ -140,7 +154,8 @@ class EspNowTransport final : public Transport {
     const uint8_t *mac,
     uint32_t now_ms,
     bool has_rssi,
-    int8_t rssi
+    int8_t rssi,
+    const char *service = nullptr
   );
   bool addEspNowPeer(const uint8_t *mac);
 

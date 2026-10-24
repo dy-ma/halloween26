@@ -1,11 +1,12 @@
 import type { AnimationCommand } from '../commands/animation-command'
 import type { AnimationCommandSource } from '../commands/command-bus'
+import { wakeTiming } from './wake-timing.ts'
 
 // Spread four 220ms blinks evenly across the opening movement phase. Gaze keeps
 // its faster cadence underneath, then continues without blinking.
 const wakeCues: ReadonlyArray<readonly [number, AnimationCommand]> = [
-  [180, { type: 'eye/open', durationMs: 320 }],
-  [500, { type: 'eye/mode', mode: 'alert' }],
+  [wakeTiming.openDelayMs, { type: 'eye/open', durationMs: wakeTiming.openDurationMs }],
+  [wakeTiming.alertDelayMs, { type: 'eye/mode', mode: 'alert' }],
   [550, { type: 'eye/blink', durationMs: 220 }],
   [600, { type: 'eye/look', x: -0.65, y: -0.12 }],
   [900, { type: 'eye/look', x: 0.15, y: -0.2 }],
@@ -22,11 +23,11 @@ const wakeCues: ReadonlyArray<readonly [number, AnimationCommand]> = [
   [3300, { type: 'eye/look', x: 0.5, y: -0.1 }],
   [3600, { type: 'eye/look', x: -0.45, y: -0.2 }],
   [3900, { type: 'eye/look', x: -0.25, y: -0.12 }],
-  // With fx's 750ms route delay, this begins 4.75s into the audio at the moo.
+  // At a 750ms wake offset, this begins 4.75s into the audio at the moo.
   // Continue from the final unaccompanied glance after the blink phase ends.
   // Keep x unchanged: recentering also turns the iris and causes a visible snap.
-  [4000, { type: 'eye/mode', mode: 'tipping' }],
-  [4000, { type: 'eye/look', x: -0.25, y: -0.65, durationMs: 2400 }],
+  [wakeTiming.tipDelayMs, { type: 'eye/mode', mode: 'tipping' }],
+  [wakeTiming.tipDelayMs, { type: 'eye/look', x: -0.25, y: -0.65, durationMs: wakeTiming.tipDurationMs }],
 ]
 
 export const wakeSequenceSource: AnimationCommandSource = {

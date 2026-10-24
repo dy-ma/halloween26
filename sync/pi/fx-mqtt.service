@@ -1,0 +1,14 @@
+[Unit]
+Description=Halloween FX show controller (MQTT test)
+
+[Service]
+Type=simple
+WorkingDirectory=%h/halloween/2026
+ExecStart=%h/halloween/2026/fx/bin/fx run --config %h/halloween/2026/sync/shows/integration-mqtt.toml
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

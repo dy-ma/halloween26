@@ -1,5 +1,9 @@
 # FX audio
 
+The show server now has a dedicated dashboard Audio devices section with a
+named track catalog, independent outputs, layered playback, per-voice Stop,
+and shared DAG playback status. See [the audio guide](../sync/AUDIO.md).
+
 `fx-audio` provides one primitive: **play an audio file on an audio device**.
 It also exposes device enumeration and the Bluetooth controls needed to make
 Bluetooth audio devices available. The accompanying `fx` CLI is a thin testing
@@ -201,6 +205,7 @@ initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
 [sinks.tip_motor]
 type = "cue"
 link = "radio"
+target = "AABBCCDDEEFF"
 namespace = "tractor:stepper"
 
 [flows.tip]

@@ -1,0 +1,68 @@
+version = 2
+name = "audio-smoke"
+
+[playback]
+max_active = 4
+
+[links.test]
+type = "simulated-cue"
+
+[sources.remote]
+type = "cue-link"
+link = "test"
+
+[assets.tractor_tip]
+type = "audio"
+file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
+
+[assets.tractor_source]
+type = "audio"
+file = "/home/dyma/audio/tractor_tipping_0015-0026.wav"
+
+# These must be silent virtual sinks, never the real speakers.
+[sinks.front]
+type = "audio"
+device = "fx_audio_test_a"
+
+[sinks.rear]
+type = "audio"
+device = "fx_audio_test_b"
+
+[sinks.eye]
+type = "screen"
+screen_id = "test-eye"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[server]
+bind = "0.0.0.0:18080"
+static_dir = "../../tractor-eye/dist-staged"
+screen_id = "test-eye"
+
+[flows.audio_dag]
+trigger = { source = "remote", cue = "test:audio" }
+
+[[flows.audio_dag.nodes]]
+id = "parent"
+action = { type = "audio.play", sink = "front", asset = "tractor_tip" }
+
+[[flows.audio_dag.nodes]]
+id = "child"
+after = ["parent"]
+action = { type = "audio.play", sink = "rear", asset = "tractor_source" }
+
+[controls.audio_dag]
+type = "flow"
+label = "Audio dependency test"
+flow = "audio_dag"
+
+[flows.stop_all]
+trigger = { source = "remote", cue = "show:stop" }
+
+[[flows.stop_all.nodes]]
+id = "reset"
+action = { type = "screen.command", sink = "eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[controls.stop_all]
+type = "flow"
+label = "STOP ALL"
+flow = "stop_all"

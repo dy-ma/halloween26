@@ -1,0 +1,15 @@
+[
+  {
+    "model": "rib-5-way",
+    "material": "pla",
+    "supports": false,
+    "gcode_summary": [
+      "; model printing time: 32m 29s; total estimated time: 38m 43s",
+      "; total filament length [mm] : 9761.33",
+      "; total filament volume [cm^3] : 23478.76",
+      "; total filament weight [g] : 29.58"
+    ],
+    "model_time": "32m 29s",
+    "filament_g": 29.58
+  }
+]

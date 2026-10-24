@@ -1,0 +1,164 @@
+version = 2
+name = "integration-simulator"
+
+[playback]
+max_active = 8
+dedupe_capacity = 512
+
+[links.radio]
+type = "simulated-cue"
+
+[sources.remote]
+type = "cue-link"
+link = "radio"
+
+[sinks.eye]
+type = "screen"
+screen_id = "tractor-eye"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[sinks.dc_a]
+type = "cue"
+link = "radio"
+target = "sim-dc-a"
+
+[sinks.dc_b]
+type = "cue"
+link = "radio"
+target = "sim-dc-b"
+
+[sinks.stepper]
+type = "cue"
+link = "radio"
+target = "sim-stepper"
+
+[server]
+bind = "0.0.0.0:8080"
+static_dir = "../../tractor-eye/dist"
+screen_id = "tractor-eye"
+
+[kiosk]
+enabled = false
+
+[flows.integration]
+trigger = { source = "remote", cue = "show:start" }
+
+[[flows.integration.nodes]]
+id = "wake-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" }, final_state = { mode = "alert", gaze = { x = -0.2, y = -0.5 } } }
+
+[[flows.integration.nodes]]
+id = "dc-a-pulse"
+at_ms = 500
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:fwd:70:500" }
+
+[[flows.integration.nodes]]
+id = "dc-b-pulse"
+at_ms = 750
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:rev:70:500" }
+
+[[flows.integration.nodes]]
+id = "stepper-turn"
+at_ms = 1000
+action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60" }
+
+[flows.stop_all]
+trigger = { source = "remote", cue = "show:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-dc-a"
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-dc-b"
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-stepper"
+action = { type = "cue.emit", sink = "stepper", cue = "step:stop" }
+
+[[flows.stop_all.nodes]]
+id = "reset-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[controls.run_integration]
+type = "flow"
+label = "Run integration sequence"
+flow = "integration"
+
+[controls.stop_all]
+type = "flow"
+label = "STOP ALL"
+flow = "stop_all"
+
+[controls.dc_a_forward]
+type = "cue"
+label = "DC A forward"
+sink = "dc_a"
+cue = "dc:jog:fwd:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "w"
+
+[controls.dc_a_reverse]
+type = "cue"
+label = "DC A reverse"
+sink = "dc_a"
+cue = "dc:jog:rev:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "s"
+
+[controls.dc_b_forward]
+type = "cue"
+label = "DC B forward"
+sink = "dc_b"
+cue = "dc:jog:fwd:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "ArrowUp"
+
+[controls.dc_b_reverse]
+type = "cue"
+label = "DC B reverse"
+sink = "dc_b"
+cue = "dc:jog:rev:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "ArrowDown"
+
+[controls.stepper_stroke]
+type = "cue"
+label = "Stroke piston counter-clockwise (360°)"
+sink = "stepper"
+cue = "step:rev:1600:60"
+key = "Space"
+
+[controls.stepper_position_cw]
+type = "cue"
+label = "Position clockwise"
+sink = "stepper"
+cue = "step:jog:fwd:30"
+release_cue = "step:stop"
+repeat_ms = 100
+expires_after_ms = 500
+
+[controls.stepper_position_ccw]
+type = "cue"
+label = "Position counter-clockwise"
+sink = "stepper"
+cue = "step:jog:rev:30"
+release_cue = "step:stop"
+repeat_ms = 100
+expires_after_ms = 500
+
+[controls.stepper_stop]
+type = "cue"
+label = "Stop stepper"
+sink = "stepper"
+cue = "step:stop"
+

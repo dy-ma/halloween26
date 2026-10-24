@@ -1,0 +1,16 @@
+[
+  {
+    "model": "cloth-6-way",
+    "material": "pla",
+    "supports": false,
+    "layer_height_mm": 0.4,
+    "gcode_summary": [
+      "; model printing time: 38m 51s; total estimated time: 45m 4s",
+      "; total filament length [mm] : 12402.01",
+      "; total filament volume [cm^3] : 29830.33",
+      "; total filament weight [g] : 37.59"
+    ],
+    "model_time": "38m 51s",
+    "filament_g": 37.59
+  }
+]

@@ -1,0 +1,41 @@
+[
+  {
+    "model": "hub-6-way",
+    "material": "petg",
+    "supports": true,
+    "gcode_summary": [
+      "; model printing time: 1h 58m 42s; total estimated time: 2h 5m 2s",
+      "; total filament length [mm] : 16303.52",
+      "; total filament volume [cm^3] : 39214.56",
+      "; total filament weight [g] : 49.80"
+    ],
+    "model_time": "1h 58m 42s",
+    "filament_g": 49.8
+  },
+  {
+    "model": "rib-6-way",
+    "material": "petg",
+    "supports": false,
+    "gcode_summary": [
+      "; model printing time: 1h 9m 21s; total estimated time: 1h 15m 42s",
+      "; total filament length [mm] : 10693.32",
+      "; total filament volume [cm^3] : 25720.46",
+      "; total filament weight [g] : 32.66"
+    ],
+    "model_time": "1h 9m 21s",
+    "filament_g": 32.66
+  },
+  {
+    "model": "polygon-6-way",
+    "material": "petg",
+    "supports": false,
+    "gcode_summary": [
+      "; model printing time: 1h 33m 38s; total estimated time: 1h 39m 59s",
+      "; total filament length [mm] : 15793.12",
+      "; total filament volume [cm^3] : 37986.90",
+      "; total filament weight [g] : 48.24"
+    ],
+    "model_time": "1h 33m 38s",
+    "filament_g": 48.24
+  }
+]

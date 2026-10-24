@@ -46,6 +46,15 @@ int main() {
   assert(decoded.kind == cue::PacketKind::ACK);
   assert(decoded.reported_rssi == -67);
 
+  const cue::Packet hello = cue::makeHelloPacket(
+    0x112233445566ULL,
+    "dc-motor"
+  );
+  assert(cue::encode(hello, bytes, sizeof(bytes)));
+  assert(cue::decode(bytes, sizeof(bytes), decoded));
+  assert(decoded.kind == cue::PacketKind::HELLO);
+  assert(strcmp(decoded.message.name, "dc-motor") == 0);
+
   cue::DuplicateCache<2> cache;
   assert(!cache.contains(1, 1));
   assert(cache.remember(1, 1));

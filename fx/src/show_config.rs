@@ -31,6 +31,8 @@ pub struct ShowConfig {
     pub sinks: BTreeMap<String, SinkConfig>,
     #[serde(default)]
     pub flows: BTreeMap<String, FlowConfig>,
+    #[serde(default)]
+    pub controls: BTreeMap<String, ControlConfig>,
     pub server: Option<ServerConfig>,
     #[serde(default)]
     pub kiosk: KioskConfig,
@@ -45,13 +47,35 @@ pub enum LinkConfig {
         #[serde(default = "default_baud")]
         baud: u32,
     },
+    #[serde(rename = "mqtt-cue")]
+    MqttCue {
+        host: String,
+        #[serde(default = "default_mqtt_port")]
+        port: u16,
+        /// The Pi/fx node ID used as the source and MQTT inbox address.
+        node: String,
+        #[serde(default = "default_mqtt_client_id")]
+        client_id: String,
+        #[serde(default = "default_mqtt_topic_prefix")]
+        topic_prefix: String,
+        username: Option<String>,
+        /// Read the broker password from this environment variable.
+        password_env: Option<String>,
+    },
+    #[serde(rename = "simulated-cue")]
+    SimulatedCue,
 }
 
 impl LinkConfig {
-    pub fn serial(&self) -> (Option<PathBuf>, u32) {
+    pub fn serial(&self) -> Option<(Option<PathBuf>, u32)> {
         match self {
-            Self::SerialCue { port, baud } => (port.clone(), *baud),
+            Self::SerialCue { port, baud } => Some((port.clone(), *baud)),
+            Self::MqttCue { .. } | Self::SimulatedCue => None,
         }
+    }
+
+    pub fn is_simulated(&self) -> bool {
+        matches!(self, Self::SimulatedCue)
     }
 }
 
@@ -110,9 +134,52 @@ pub enum SinkConfig {
     #[serde(rename = "cue")]
     Cue {
         link: String,
+        target: String,
         #[serde(default)]
         namespace: String,
     },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+pub enum ControlConfig {
+    #[serde(rename = "flow")]
+    Flow {
+        label: String,
+        flow: String,
+        key: Option<String>,
+        panel: Option<String>,
+        section: Option<ControlSection>,
+    },
+    #[serde(rename = "cue")]
+    Cue {
+        label: String,
+        sink: String,
+        cue: String,
+        release_cue: Option<String>,
+        #[serde(default = "default_action_lifetime_ms")]
+        expires_after_ms: u64,
+        repeat_ms: Option<u64>,
+        key: Option<String>,
+        panel: Option<String>,
+        section: Option<ControlSection>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ControlSection {
+    Show,
+    Bench,
+}
+
+impl ControlSection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Show => "show",
+            Self::Bench => "bench",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -136,6 +203,8 @@ pub struct NodeConfig {
     pub id: String,
     #[serde(default)]
     pub at_ms: u64,
+    #[serde(default)]
+    pub after: Vec<String>,
     pub action: ActionConfig,
 }
 
@@ -163,6 +232,10 @@ pub enum ActionConfig {
         cue: String,
         #[serde(default = "default_action_lifetime_ms")]
         expires_after_ms: u64,
+        /// Physical application status, correlated to this command (not its ACK).
+        wait_for: Option<String>,
+        #[serde(default = "default_completion_timeout_ms")]
+        timeout_ms: u64,
     },
 }
 
@@ -334,11 +407,42 @@ fn validate(config: &ShowConfig) -> Result<()> {
 
     for (name, link) in &config.links {
         require_name(name, "link name")?;
-        let (_, baud) = link.serial();
-        if baud == 0 {
+        if let Some((_, baud)) = link.serial()
+            && baud == 0
+        {
             return Err(FxError::ShowConfig(format!(
                 "links.{name}.baud must be non-zero"
             )));
+        }
+        if let LinkConfig::MqttCue {
+            host,
+            port,
+            node,
+            client_id,
+            topic_prefix,
+            username,
+            password_env,
+        } = link
+        {
+            require_name(host, &format!("links.{name}.host"))?;
+            require_name(node, &format!("links.{name}.node"))?;
+            require_name(client_id, &format!("links.{name}.client_id"))?;
+            require_name(topic_prefix, &format!("links.{name}.topic_prefix"))?;
+            if *port == 0 {
+                return Err(FxError::ShowConfig(format!(
+                    "links.{name}.port must be non-zero"
+                )));
+            }
+            if !is_node_id(node) {
+                return Err(FxError::ShowConfig(format!(
+                    "links.{name}.node must be a 12-digit hexadecimal node ID"
+                )));
+            }
+            if username.is_some() != password_env.is_some() {
+                return Err(FxError::ShowConfig(format!(
+                    "links.{name}.username and password_env must be set together"
+                )));
+            }
         }
     }
     for (name, source) in &config.sources {
@@ -378,8 +482,18 @@ fn validate(config: &ShowConfig) -> Result<()> {
                 }
                 initial_state.validate()?;
             }
-            SinkConfig::Cue { link, namespace } => {
+            SinkConfig::Cue {
+                link,
+                target,
+                namespace,
+            } => {
                 require_reference(&config.links, link, &format!("sinks.{name}.link"))?;
+                require_name(target, &format!("sinks.{name}.target"))?;
+                if matches!(config.links[link], LinkConfig::MqttCue { .. }) && !is_node_id(target) {
+                    return Err(FxError::ShowConfig(format!(
+                        "sinks.{name}.target must be a 12-digit hexadecimal node ID for MQTT"
+                    )));
+                }
                 if namespace.len() >= MAX_CUE_NAME_BYTES {
                     return Err(FxError::ShowConfig(format!(
                         "sinks.{name}.namespace is too long"
@@ -392,6 +506,84 @@ fn validate(config: &ShowConfig) -> Result<()> {
     validate_server(config, &screen_ids)?;
     for (flow_name, flow) in &config.flows {
         validate_flow(config, flow_name, flow)?;
+    }
+    let mut control_keys = BTreeMap::new();
+    for (control_name, control) in &config.controls {
+        validate_control(config, control_name, control)?;
+        let key = match control {
+            ControlConfig::Flow { key, .. } | ControlConfig::Cue { key, .. } => key,
+        };
+        if let Some(key) = key {
+            let normalized = key.to_lowercase();
+            if let Some(previous) = control_keys.insert(normalized, control_name) {
+                return Err(FxError::ShowConfig(format!(
+                    "controls.{control_name}.key duplicates controls.{previous}.key"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_control(config: &ShowConfig, name: &str, control: &ControlConfig) -> Result<()> {
+    require_name(name, "control name")?;
+    match control {
+        ControlConfig::Flow {
+            label, flow, key, ..
+        } => {
+            require_name(label, &format!("controls.{name}.label"))?;
+            require_reference(&config.flows, flow, &format!("controls.{name}.flow"))?;
+            validate_control_key(key.as_deref(), name)
+        }
+        ControlConfig::Cue {
+            label,
+            sink,
+            cue,
+            release_cue,
+            expires_after_ms,
+            repeat_ms,
+            key,
+            ..
+        } => {
+            require_name(label, &format!("controls.{name}.label"))?;
+            let namespace = match config.sinks.get(sink) {
+                Some(SinkConfig::Cue { namespace, .. }) => namespace,
+                Some(_) => {
+                    return Err(wrong_sink_type(&format!("controls.{name}"), sink, "cue"));
+                }
+                None => return Err(unknown_reference(&format!("controls.{name}.sink"), sink)),
+            };
+            validate_cue_name(
+                &qualified_cue(namespace, cue),
+                &format!("controls.{name}.cue"),
+            )?;
+            if let Some(release_cue) = release_cue {
+                validate_cue_name(
+                    &qualified_cue(namespace, release_cue),
+                    &format!("controls.{name}.release_cue"),
+                )?;
+            }
+            validate_lifetime(*expires_after_ms, &format!("controls.{name}"))?;
+            if repeat_ms.is_some_and(|repeat| !(50..=5_000).contains(&repeat)) {
+                return Err(FxError::ShowConfig(format!(
+                    "controls.{name}.repeat_ms must be between 50 and 5000"
+                )));
+            }
+            if repeat_ms.is_some() && release_cue.is_none() {
+                return Err(FxError::ShowConfig(format!(
+                    "controls.{name}.repeat_ms requires release_cue"
+                )));
+            }
+            validate_control_key(key.as_deref(), name)
+        }
+    }
+}
+
+fn validate_control_key(key: Option<&str>, control: &str) -> Result<()> {
+    if key.is_some_and(|value| value.trim().is_empty() || value.len() > 32) {
+        return Err(FxError::ShowConfig(format!(
+            "controls.{control}.key must contain between 1 and 32 bytes"
+        )));
     }
     Ok(())
 }
@@ -467,6 +659,37 @@ fn validate_flow(config: &ShowConfig, flow_name: &str, flow: &FlowConfig) -> Res
         }
         validate_action(config, flow_name, node)?;
     }
+    let mut resolved = BTreeSet::new();
+    for node in &flow.nodes {
+        let mut unique = BTreeSet::new();
+        for dependency in &node.after {
+            if !node_ids.contains(dependency.as_str())
+                || dependency == &node.id
+                || !unique.insert(dependency)
+            {
+                return Err(FxError::ShowConfig(format!(
+                    "invalid dependency `{dependency}` on {flow_name}/{}",
+                    node.id
+                )));
+            }
+        }
+    }
+    loop {
+        let before = resolved.len();
+        for node in &flow.nodes {
+            if node.after.iter().all(|id| resolved.contains(id.as_str())) {
+                resolved.insert(node.id.as_str());
+            }
+        }
+        if resolved.len() == flow.nodes.len() {
+            break;
+        }
+        if resolved.len() == before {
+            return Err(FxError::ShowConfig(format!(
+                "flow `{flow_name}` contains a dependency cycle"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -508,6 +731,8 @@ fn validate_action(config: &ShowConfig, flow_name: &str, node: &NodeConfig) -> R
             sink,
             cue,
             expires_after_ms,
+            wait_for,
+            timeout_ms,
         } => {
             let namespace = match config.sinks.get(sink) {
                 Some(SinkConfig::Cue { namespace, .. }) => namespace,
@@ -516,9 +741,21 @@ fn validate_action(config: &ShowConfig, flow_name: &str, node: &NodeConfig) -> R
             };
             validate_lifetime(*expires_after_ms, &field)?;
             validate_cue_name(&qualified_cue(namespace, cue), &format!("{field}.cue"))?;
+            if let Some(event) = wait_for {
+                // Status wire names reserve 17 bytes for :<16-hex-command-id>.
+                if event.is_empty() || event.len() > 14 || !(1..=600_000).contains(timeout_ms) {
+                    return Err(FxError::ShowConfig(format!(
+                        "{field}: wait_for must be 1–14 bytes and timeout_ms 1–600000"
+                    )));
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn default_completion_timeout_ms() -> u64 {
+    10_000
 }
 
 pub fn qualified_cue(namespace: &str, cue: &str) -> String {
@@ -600,6 +837,19 @@ fn active_show_pointer() -> Result<PathBuf> {
 const fn default_baud() -> u32 {
     115_200
 }
+const fn default_mqtt_port() -> u16 {
+    1883
+}
+fn default_mqtt_client_id() -> String {
+    "fx-show".into()
+}
+fn default_mqtt_topic_prefix() -> String {
+    "halloween".into()
+}
+
+fn is_node_id(value: &str) -> bool {
+    value.len() == 12 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
 const fn default_max_active() -> usize {
     16
 }
@@ -649,6 +899,7 @@ volume = 0.7
 [sinks.motor]
 type = "cue"
 link = "radio"
+target = "AABBCCDDEEFF"
 namespace = "tractor:stepper"
 
 [flows.tip]
@@ -662,6 +913,17 @@ action = { type = "audio.play", sink = "speaker", asset = "tip" }
 id = "stroke"
 at_ms = 8500
 action = { type = "cue.emit", sink = "motor", cue = "stroke", expires_after_ms = 500 }
+
+[controls.tip]
+type = "flow"
+label = "Run tractor tip"
+flow = "tip"
+
+[controls.stepper]
+type = "cue"
+label = "Stepper stroke"
+sink = "motor"
+cue = "stroke"
 "#;
 
     #[test]
@@ -701,12 +963,58 @@ action = { type = "cue.emit", sink = "motor", cue = "stroke", expires_after_ms =
     }
 
     #[test]
+    fn validates_dag_edges_and_rejects_cycles_and_unknown_dependencies() {
+        let valid = VALID.replace("id = \"stroke\"", "id = \"stroke\"\nafter = [\"sound\"]");
+        assert!(parse(&valid, Path::new("/shows")).is_ok());
+        let cycle = valid.replace("id = \"sound\"", "id = \"sound\"\nafter = [\"stroke\"]");
+        assert!(parse(&cycle, Path::new("/shows")).is_err());
+        assert!(
+            parse(
+                &valid.replace("after = [\"sound\"]", "after = [\"missing\"]"),
+                Path::new("/shows")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn checked_in_show_manifests_match_the_public_schema() {
         for manifest in [
             include_str!("../shows/tractor-bluetooth.toml"),
             include_str!("../shows/tractor-usb.toml"),
+            include_str!("../../sync/shows/integration-sim.toml"),
+            include_str!("../../sync/shows/integration-hardware.toml"),
+            include_str!("../../sync/shows/integration-mqtt.toml"),
         ] {
             parse(manifest, Path::new("/shows")).unwrap();
+        }
+    }
+
+    #[test]
+    fn installed_stepper_direction_mapping_stays_calibrated() {
+        for manifest in [
+            include_str!("../../sync/shows/integration-sim.toml"),
+            include_str!("../../sync/shows/integration-hardware.toml"),
+            include_str!("../../sync/shows/integration-mqtt.toml"),
+        ] {
+            let show = parse(manifest, Path::new("/shows")).unwrap();
+            for (control, expected) in [
+                ("stepper_stroke", "step:rev:1600:60"),
+                ("stepper_position_cw", "step:jog:fwd:30"),
+                ("stepper_position_ccw", "step:jog:rev:30"),
+            ] {
+                assert!(matches!(
+                    &show.controls[control],
+                    ControlConfig::Cue { cue, .. } if cue == expected
+                ));
+            }
+            assert!(show.flows["integration"].nodes.iter().any(|node| {
+                node.id == "stepper-turn"
+                    && matches!(
+                        &node.action,
+                        ActionConfig::CueEmit { cue, .. } if cue == "step:rev:1600:60"
+                    )
+            }));
         }
     }
 }

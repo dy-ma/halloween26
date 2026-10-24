@@ -17,7 +17,10 @@ export function createRuntimeWebSocketSource(options: RuntimeSourceOptions): Ani
       const timeout = setTimeout(() => controller.abort(), 5_000)
       const load = async () => {
         try {
-          const response = await (options.fetchConfig ?? fetch)(new URL('/config.json', options.pageUrl), {
+          const configUrl = new URL('/config.json', options.pageUrl)
+          const role = new URL(options.pageUrl).searchParams.get('screen')
+          if (role) configUrl.searchParams.set('screen', role)
+          const response = await (options.fetchConfig ?? fetch)(configUrl, {
             cache: 'no-store', signal: controller.signal,
           })
           if (!response.ok) throw new Error('Config unavailable')

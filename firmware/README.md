@@ -49,10 +49,11 @@ This avoids an all-or-nothing distributed barrier in the latency-sensitive
 path. Tighter choreography can later add a scene/correlation ID and a future
 execution timestamp without changing the ACK/retry mechanism.
 
-Peer discovery is provided for bring-up and the two-board test. A production
-installation should configure the intended peer IDs explicitly with
-`EspNowTransport::addPeer()` so adding another powered board cannot change the
-chosen recipient.
+Peer discovery HELLO packets carry the board's service name when one is set in
+`EspNowTransport::Config`. Applications can enumerate the discovered node ID,
+service, last-seen time, and RSSI with `peerAt()`. Production commands should
+still use explicit intended peer IDs so adding another powered board cannot
+change the chosen recipient.
 
 ## Structure
 
@@ -61,6 +62,7 @@ firmware/
 ├── lib/cue-core/             addressed messages, IDs, wire format, dedupe
 ├── lib/cue-transport/        non-blocking receive and delivery contracts
 ├── lib/cue-espnow/           peers, ACKs, retries, RSSI, discovery, LR mode
+├── lib/cue-mqtt/             Wi-Fi/MQTT adapter, ACKs, retries, presence
 ├── src/reliable_button_test.cpp
 ├── src/button_node.cpp
 ├── src/pi_gateway.cpp

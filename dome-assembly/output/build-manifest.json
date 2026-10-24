@@ -1,0 +1,1104 @@
+{
+  "design": {
+    "name": "2V hemispherical dowel dome",
+    "sphere_radius_mm": 673.1,
+    "height_in": 26.5,
+    "base_corner_to_corner_in": 53.0,
+    "base_flat_to_flat_in": 50.406,
+    "dowel_nominal_diameter_in": 0.5,
+    "bore_diameter_mm": 13.3,
+    "socket_insertion_mm": 27.0
+  },
+  "joint_quantities": {
+    "4-way-A": 5,
+    "4-way-B": 5,
+    "5-way": 6,
+    "6-way": 10
+  },
+  "struts": {
+    "short": {
+      "quantity": 30,
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    "long": {
+      "quantity": 35,
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    }
+  },
+  "nodes": [
+    {
+      "node": "N01",
+      "joint": "5-way",
+      "xyz_mm": [
+        0.0,
+        -0.0,
+        673.1
+      ],
+      "neighbors": [
+        "N02",
+        "N03",
+        "N04",
+        "N05",
+        "N06"
+      ]
+    },
+    {
+      "node": "N02",
+      "joint": "6-way",
+      "xyz_mm": [
+        -207.999,
+        -286.287,
+        572.573
+      ],
+      "neighbors": [
+        "N01",
+        "N03",
+        "N06",
+        "N07",
+        "N08",
+        "N12"
+      ]
+    },
+    {
+      "node": "N03",
+      "joint": "6-way",
+      "xyz_mm": [
+        207.999,
+        -286.287,
+        572.573
+      ],
+      "neighbors": [
+        "N01",
+        "N02",
+        "N04",
+        "N08",
+        "N09",
+        "N13"
+      ]
+    },
+    {
+      "node": "N04",
+      "joint": "6-way",
+      "xyz_mm": [
+        336.55,
+        109.352,
+        572.573
+      ],
+      "neighbors": [
+        "N01",
+        "N03",
+        "N05",
+        "N09",
+        "N10",
+        "N14"
+      ]
+    },
+    {
+      "node": "N05",
+      "joint": "6-way",
+      "xyz_mm": [
+        0.0,
+        353.87,
+        572.573
+      ],
+      "neighbors": [
+        "N01",
+        "N04",
+        "N06",
+        "N10",
+        "N11",
+        "N15"
+      ]
+    },
+    {
+      "node": "N06",
+      "joint": "6-way",
+      "xyz_mm": [
+        -336.55,
+        109.352,
+        572.573
+      ],
+      "neighbors": [
+        "N01",
+        "N02",
+        "N05",
+        "N07",
+        "N11",
+        "N16"
+      ]
+    },
+    {
+      "node": "N07",
+      "joint": "6-way",
+      "xyz_mm": [
+        -544.549,
+        -176.935,
+        353.87
+      ],
+      "neighbors": [
+        "N02",
+        "N06",
+        "N12",
+        "N16",
+        "N17",
+        "N26"
+      ]
+    },
+    {
+      "node": "N08",
+      "joint": "6-way",
+      "xyz_mm": [
+        0.0,
+        -572.573,
+        353.87
+      ],
+      "neighbors": [
+        "N02",
+        "N03",
+        "N12",
+        "N13",
+        "N18",
+        "N19"
+      ]
+    },
+    {
+      "node": "N09",
+      "joint": "6-way",
+      "xyz_mm": [
+        544.549,
+        -176.935,
+        353.87
+      ],
+      "neighbors": [
+        "N03",
+        "N04",
+        "N13",
+        "N14",
+        "N20",
+        "N21"
+      ]
+    },
+    {
+      "node": "N10",
+      "joint": "6-way",
+      "xyz_mm": [
+        336.55,
+        463.221,
+        353.87
+      ],
+      "neighbors": [
+        "N04",
+        "N05",
+        "N14",
+        "N15",
+        "N22",
+        "N23"
+      ]
+    },
+    {
+      "node": "N11",
+      "joint": "6-way",
+      "xyz_mm": [
+        -336.55,
+        463.221,
+        353.87
+      ],
+      "neighbors": [
+        "N05",
+        "N06",
+        "N15",
+        "N16",
+        "N24",
+        "N25"
+      ]
+    },
+    {
+      "node": "N12",
+      "joint": "5-way",
+      "xyz_mm": [
+        -353.87,
+        -487.06,
+        301.019
+      ],
+      "neighbors": [
+        "N02",
+        "N07",
+        "N08",
+        "N17",
+        "N18"
+      ]
+    },
+    {
+      "node": "N13",
+      "joint": "5-way",
+      "xyz_mm": [
+        353.87,
+        -487.06,
+        301.019
+      ],
+      "neighbors": [
+        "N03",
+        "N08",
+        "N09",
+        "N19",
+        "N20"
+      ]
+    },
+    {
+      "node": "N14",
+      "joint": "5-way",
+      "xyz_mm": [
+        572.573,
+        186.04,
+        301.019
+      ],
+      "neighbors": [
+        "N04",
+        "N09",
+        "N10",
+        "N21",
+        "N22"
+      ]
+    },
+    {
+      "node": "N15",
+      "joint": "5-way",
+      "xyz_mm": [
+        0.0,
+        602.039,
+        301.019
+      ],
+      "neighbors": [
+        "N05",
+        "N10",
+        "N11",
+        "N23",
+        "N24"
+      ]
+    },
+    {
+      "node": "N16",
+      "joint": "5-way",
+      "xyz_mm": [
+        -572.573,
+        186.04,
+        301.019
+      ],
+      "neighbors": [
+        "N06",
+        "N07",
+        "N11",
+        "N25",
+        "N26"
+      ]
+    },
+    {
+      "node": "N17",
+      "joint": "4-way-A",
+      "xyz_mm": [
+        -544.549,
+        -395.638,
+        0.0
+      ],
+      "neighbors": [
+        "N07",
+        "N12",
+        "N18",
+        "N26"
+      ]
+    },
+    {
+      "node": "N18",
+      "joint": "4-way-B",
+      "xyz_mm": [
+        -207.999,
+        -640.156,
+        0.0
+      ],
+      "neighbors": [
+        "N08",
+        "N12",
+        "N17",
+        "N19"
+      ]
+    },
+    {
+      "node": "N19",
+      "joint": "4-way-A",
+      "xyz_mm": [
+        207.999,
+        -640.156,
+        0.0
+      ],
+      "neighbors": [
+        "N08",
+        "N13",
+        "N18",
+        "N20"
+      ]
+    },
+    {
+      "node": "N20",
+      "joint": "4-way-B",
+      "xyz_mm": [
+        544.549,
+        -395.638,
+        0.0
+      ],
+      "neighbors": [
+        "N09",
+        "N13",
+        "N19",
+        "N21"
+      ]
+    },
+    {
+      "node": "N21",
+      "joint": "4-way-A",
+      "xyz_mm": [
+        673.1,
+        0.0,
+        0.0
+      ],
+      "neighbors": [
+        "N09",
+        "N14",
+        "N20",
+        "N22"
+      ]
+    },
+    {
+      "node": "N22",
+      "joint": "4-way-B",
+      "xyz_mm": [
+        544.549,
+        395.638,
+        0.0
+      ],
+      "neighbors": [
+        "N10",
+        "N14",
+        "N21",
+        "N23"
+      ]
+    },
+    {
+      "node": "N23",
+      "joint": "4-way-A",
+      "xyz_mm": [
+        207.999,
+        640.156,
+        -0.0
+      ],
+      "neighbors": [
+        "N10",
+        "N15",
+        "N22",
+        "N24"
+      ]
+    },
+    {
+      "node": "N24",
+      "joint": "4-way-B",
+      "xyz_mm": [
+        -207.999,
+        640.156,
+        -0.0
+      ],
+      "neighbors": [
+        "N11",
+        "N15",
+        "N23",
+        "N25"
+      ]
+    },
+    {
+      "node": "N25",
+      "joint": "4-way-A",
+      "xyz_mm": [
+        -544.549,
+        395.638,
+        0.0
+      ],
+      "neighbors": [
+        "N11",
+        "N16",
+        "N24",
+        "N26"
+      ]
+    },
+    {
+      "node": "N26",
+      "joint": "4-way-B",
+      "xyz_mm": [
+        -673.1,
+        0.0,
+        0.0
+      ],
+      "neighbors": [
+        "N07",
+        "N16",
+        "N17",
+        "N25"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edge": "E01",
+      "from": "N01",
+      "to": "N02",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E02",
+      "from": "N01",
+      "to": "N03",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E03",
+      "from": "N01",
+      "to": "N04",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E04",
+      "from": "N01",
+      "to": "N05",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E05",
+      "from": "N01",
+      "to": "N06",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E06",
+      "from": "N02",
+      "to": "N03",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E07",
+      "from": "N02",
+      "to": "N06",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E08",
+      "from": "N02",
+      "to": "N07",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E09",
+      "from": "N02",
+      "to": "N08",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E10",
+      "from": "N02",
+      "to": "N12",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E11",
+      "from": "N03",
+      "to": "N04",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E12",
+      "from": "N03",
+      "to": "N08",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E13",
+      "from": "N03",
+      "to": "N09",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E14",
+      "from": "N03",
+      "to": "N13",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E15",
+      "from": "N04",
+      "to": "N05",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E16",
+      "from": "N04",
+      "to": "N09",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E17",
+      "from": "N04",
+      "to": "N10",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E18",
+      "from": "N04",
+      "to": "N14",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E19",
+      "from": "N05",
+      "to": "N06",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E20",
+      "from": "N05",
+      "to": "N10",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E21",
+      "from": "N05",
+      "to": "N11",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E22",
+      "from": "N05",
+      "to": "N15",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E23",
+      "from": "N06",
+      "to": "N07",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E24",
+      "from": "N06",
+      "to": "N11",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E25",
+      "from": "N06",
+      "to": "N16",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E26",
+      "from": "N07",
+      "to": "N12",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E27",
+      "from": "N07",
+      "to": "N16",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E28",
+      "from": "N07",
+      "to": "N17",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E29",
+      "from": "N07",
+      "to": "N26",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E30",
+      "from": "N08",
+      "to": "N12",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E31",
+      "from": "N08",
+      "to": "N13",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E32",
+      "from": "N08",
+      "to": "N18",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E33",
+      "from": "N08",
+      "to": "N19",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E34",
+      "from": "N09",
+      "to": "N13",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E35",
+      "from": "N09",
+      "to": "N14",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E36",
+      "from": "N09",
+      "to": "N20",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E37",
+      "from": "N09",
+      "to": "N21",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E38",
+      "from": "N10",
+      "to": "N14",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E39",
+      "from": "N10",
+      "to": "N15",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E40",
+      "from": "N10",
+      "to": "N22",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E41",
+      "from": "N10",
+      "to": "N23",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E42",
+      "from": "N11",
+      "to": "N15",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E43",
+      "from": "N11",
+      "to": "N16",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E44",
+      "from": "N11",
+      "to": "N24",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E45",
+      "from": "N11",
+      "to": "N25",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E46",
+      "from": "N12",
+      "to": "N17",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E47",
+      "from": "N12",
+      "to": "N18",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E48",
+      "from": "N13",
+      "to": "N19",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E49",
+      "from": "N13",
+      "to": "N20",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E50",
+      "from": "N14",
+      "to": "N21",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E51",
+      "from": "N14",
+      "to": "N22",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E52",
+      "from": "N15",
+      "to": "N23",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E53",
+      "from": "N15",
+      "to": "N24",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E54",
+      "from": "N16",
+      "to": "N25",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E55",
+      "from": "N16",
+      "to": "N26",
+      "class": "short",
+      "center_to_center_mm": 367.871,
+      "center_to_center_in": 14.4831,
+      "dowel_cut_mm": 337.871,
+      "dowel_cut_in": 13.302
+    },
+    {
+      "edge": "E56",
+      "from": "N17",
+      "to": "N18",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E57",
+      "from": "N17",
+      "to": "N26",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E58",
+      "from": "N18",
+      "to": "N19",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E59",
+      "from": "N19",
+      "to": "N20",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E60",
+      "from": "N20",
+      "to": "N21",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E61",
+      "from": "N21",
+      "to": "N22",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E62",
+      "from": "N22",
+      "to": "N23",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E63",
+      "from": "N23",
+      "to": "N24",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E64",
+      "from": "N24",
+      "to": "N25",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    },
+    {
+      "edge": "E65",
+      "from": "N25",
+      "to": "N26",
+      "class": "long",
+      "center_to_center_mm": 415.999,
+      "center_to_center_in": 16.3779,
+      "dowel_cut_mm": 385.999,
+      "dowel_cut_in": 15.1968
+    }
+  ]
+}

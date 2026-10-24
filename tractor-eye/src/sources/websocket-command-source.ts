@@ -12,6 +12,8 @@ export interface ConnectionStatus {
 
 export type EyeSocket = Pick<WebSocket, 'addEventListener' | 'removeEventListener' | 'send' | 'close'>
 export interface WebSocketSourceOptions {
+  clientId?: string
+  clientName?: string
   createSocket?: (url: string) => EyeSocket
   now?: () => number
   random?: () => number
@@ -86,7 +88,9 @@ export function createWebSocketCommandSource(
         const onOpen = () => {
           if (!active || stopped) return
           report({ phase: 'syncing' })
-          send({ v: 1, type: 'hello', screenId: config.screenId })
+          send({ v: 1, type: 'hello', screenId: config.screenId,
+            ...(options.clientId ? { clientId: options.clientId, clientName: options.clientName } : {}),
+          })
         }
         const onMessage: EventListener = (event) => {
           if (!active || stopped) return
@@ -119,6 +123,8 @@ export function createWebSocketCommandSource(
           if (message.expiresAtMs <= now()) { fail('expired-command'); return }
           sequence = message.seq
           commandBus.publish(message.command)
+          // Reports receipt and dispatch to the client command bus, not animation completion.
+          send({ v: 1, type: 'applied', sessionId, seq: sequence })
           report({ lastAcceptedSeq: sequence })
         }
         const onClose = () => fail('socket-closed')

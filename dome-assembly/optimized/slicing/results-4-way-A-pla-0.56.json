@@ -1,0 +1,16 @@
+[
+  {
+    "model": "cloth-4-way-A",
+    "material": "pla",
+    "supports": false,
+    "layer_height_mm": 0.56,
+    "gcode_summary": [
+      "; model printing time: 27m 27s; total estimated time: 33m 40s",
+      "; total filament length [mm] : 9663.21",
+      "; total filament volume [cm^3] : 23242.74",
+      "; total filament weight [g] : 29.29"
+    ],
+    "model_time": "27m 27s",
+    "filament_g": 29.29
+  }
+]

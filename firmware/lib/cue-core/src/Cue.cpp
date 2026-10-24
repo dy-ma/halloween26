@@ -48,7 +48,8 @@ bool isValidPacket(const Packet &packet) {
         packet.message.id != 0;
     case PacketKind::HELLO:
       return packet.message.destination == kBroadcastNode &&
-        packet.message.id == 0;
+        packet.message.id == 0 &&
+        boundedLength(packet.message.name, kNameCapacity) < kNameCapacity;
   }
   return false;
 }
@@ -108,11 +109,14 @@ Packet makeAckPacket(
   return packet;
 }
 
-Packet makeHelloPacket(uint64_t source) {
+Packet makeHelloPacket(uint64_t source, const char *service) {
   Packet packet = {};
   packet.kind = PacketKind::HELLO;
   packet.message.source = source;
   packet.message.destination = kBroadcastNode;
+  if (service != nullptr && service[0] != '\0') {
+    setName(packet.message, service);
+  }
   return packet;
 }
 
@@ -130,7 +134,7 @@ bool encode(const Packet &packet, uint8_t *output, size_t output_size) {
   writeU64(output + 8, packet.message.source);
   writeU64(output + 16, packet.message.destination);
   writeU64(output + 24, packet.message.id);
-  if (packet.kind == PacketKind::CUE) {
+  if (packet.kind == PacketKind::CUE || packet.kind == PacketKind::HELLO) {
     memcpy(output + kNameOffset, packet.message.name, sizeof(packet.message.name));
   }
   return true;
@@ -149,7 +153,7 @@ bool decode(const uint8_t *input, size_t input_size, Packet &packet) {
   decoded.message.source = readU64(input + 8);
   decoded.message.destination = readU64(input + 16);
   decoded.message.id = readU64(input + 24);
-  if (decoded.kind == PacketKind::CUE) {
+  if (decoded.kind == PacketKind::CUE || decoded.kind == PacketKind::HELLO) {
     memcpy(decoded.message.name, input + kNameOffset, sizeof(decoded.message.name));
   }
   if (!isValidPacket(decoded)) {

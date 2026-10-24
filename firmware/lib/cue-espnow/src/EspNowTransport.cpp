@@ -129,6 +129,21 @@ size_t EspNowTransport::peerCount() const {
   return count;
 }
 
+bool EspNowTransport::peerAt(size_t index, PeerInfo &peer) const {
+  size_t active_index = 0;
+  for (const PeerSlot &slot : peers_) {
+    if (!slot.active) continue;
+    if (active_index++ != index) continue;
+    peer.node = slot.node;
+    peer.last_seen_ms = slot.last_seen_at;
+    peer.has_rssi = slot.has_rssi;
+    peer.rssi = slot.rssi;
+    memcpy(peer.service, slot.service, sizeof(peer.service));
+    return true;
+  }
+  return false;
+}
+
 bool EspNowTransport::firstPeer(uint64_t &node) const {
   const PeerSlot *newest = nullptr;
   for (const PeerSlot &peer : peers_) {
@@ -170,7 +185,8 @@ bool EspNowTransport::rememberPeer(
   const uint8_t *mac,
   uint32_t now_ms,
   bool has_rssi,
-  int8_t rssi
+  int8_t rssi,
+  const char *service
 ) {
   if (!isValidNode(node) || node == local_node_ || node == kBroadcastNode ||
       nodeFromMac(mac) != node || !addEspNowPeer(mac)) {
@@ -196,6 +212,10 @@ bool EspNowTransport::rememberPeer(
   slot->last_seen_at = now_ms;
   slot->has_rssi = has_rssi;
   slot->rssi = rssi;
+  if (service != nullptr && service[0] != '\0') {
+    memset(slot->service, 0, sizeof(slot->service));
+    strncpy(slot->service, service, sizeof(slot->service) - 1);
+  }
   return true;
 }
 
@@ -206,7 +226,7 @@ bool EspNowTransport::addPeer(uint64_t node) {
   }
   uint8_t mac[6] = {};
   macFromNode(node, mac);
-  return rememberPeer(node, mac, millis(), false, 0);
+  return rememberPeer(node, mac, millis(), false, 0, nullptr);
 }
 
 SendResult EspNowTransport::trySend(const Message &message) {
@@ -337,7 +357,8 @@ bool EspNowTransport::processOneIncoming(uint32_t now_ms) {
         raw.source_mac,
         now_ms,
         raw.has_rssi,
-        raw.rssi
+      raw.rssi,
+      packet.kind == PacketKind::HELLO ? packet.message.name : nullptr
       )) {
     return true;
   }
@@ -455,7 +476,11 @@ bool EspNowTransport::sendHello(uint32_t now_ms) {
     return false;
   }
   uint8_t bytes[kWireSize] = {};
-  if (!encode(makeHelloPacket(local_node_), bytes, sizeof(bytes))) {
+  if (!encode(
+        makeHelloPacket(local_node_, config_.service_name),
+        bytes,
+        sizeof(bytes)
+      )) {
     return false;
   }
   if (esp_now_send(kBroadcastAddress, bytes, sizeof(bytes)) != ESP_OK) {

@@ -1,0 +1,16 @@
+[
+  {
+    "model": "cloth-5-way",
+    "material": "pla",
+    "supports": false,
+    "layer_height_mm": 0.56,
+    "gcode_summary": [
+      "; model printing time: 33m 2s; total estimated time: 39m 16s",
+      "; total filament length [mm] : 11738.32",
+      "; total filament volume [cm^3] : 28233.97",
+      "; total filament weight [g] : 35.57"
+    ],
+    "model_time": "33m 2s",
+    "filament_g": 35.57
+  }
+]

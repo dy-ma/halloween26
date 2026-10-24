@@ -1,0 +1,107 @@
+# Isolated dashboard/API test. No MQTT, serial, audio, or physical outputs.
+version = 2
+name = "dc-pwm-smoke"
+
+[links.bench]
+type = "simulated-cue"
+
+[sources.remote]
+type = "cue-link"
+link = "bench"
+
+[sinks.dc_a]
+type = "cue"
+link = "bench"
+target = "00000000000A"
+
+[sinks.dc_b]
+type = "cue"
+link = "bench"
+target = "00000000000B"
+
+[sinks.test_eye]
+type = "screen"
+screen_id = "test-eye"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[sinks.stepper]
+type = "cue"
+link = "bench"
+target = "00000000000C"
+
+[controls.stepper_stroke]
+type = "cue"
+label = "Stroke piston counter-clockwise (360°)"
+sink = "stepper"
+cue = "step:rev:1600:60"
+
+[server]
+bind = "127.0.0.1:18081"
+static_dir = "../../tractor-eye/dist"
+screen_id = "test-eye"
+
+[controls.dc_a_forward]
+type = "cue"
+label = "DC A forward"
+sink = "dc_a"
+cue = "dc:jog:fwd:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "w"
+
+[controls.dc_a_reverse]
+type = "cue"
+label = "DC A reverse"
+sink = "dc_a"
+cue = "dc:jog:rev:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "s"
+
+[controls.dc_b_forward]
+type = "cue"
+label = "DC B forward"
+sink = "dc_b"
+cue = "dc:jog:fwd:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "ArrowUp"
+
+[controls.dc_b_reverse]
+type = "cue"
+label = "DC B reverse"
+sink = "dc_b"
+cue = "dc:jog:rev:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "ArrowDown"
+
+[controls.timed]
+type = "cue"
+label = "Timed cue (fixed)"
+sink = "dc_a"
+cue = "dc:fwd:70:500"
+
+[flows.stop_all]
+trigger = { source = "remote", cue = "show:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-a"
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-b"
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-stepper"
+action = { type = "cue.emit", sink = "stepper", cue = "step:stop" }
+
+[controls.stop_all]
+type = "flow"
+label = "STOP ALL"
+flow = "stop_all"

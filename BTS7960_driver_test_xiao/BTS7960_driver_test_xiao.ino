@@ -15,7 +15,7 @@
 
   Signal wiring (the six-pin logic header on the BTS7960 module):
     Expansion Base GND   -> BTS7960 GND
-    XIAO VBUS (USB 5V)   -> BTS7960 VCC
+    XIAO 3V3             -> BTS7960 VCC
     XIAO D7              -> BTS7960 R_EN
     XIAO D8              -> BTS7960 L_EN
     XIAO D9              -> BTS7960 RPWM

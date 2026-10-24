@@ -1,0 +1,231 @@
+version = 2
+name = "integration-mqtt"
+
+[playback]
+max_active = 8
+dedupe_capacity = 512
+
+[links.radio]
+type = "mqtt-cue"
+# The broker happens to run beside fx on the Pi today; this can be any host.
+host = "mqtt.dylfi"
+port = 1883
+node = "020000000001"
+client_id = "fx-show"
+topic_prefix = "halloween"
+# For an authenticated broker, set both fields and export the password before
+# starting fx. Keep the secret itself out of this file.
+# username = "fx"
+# password_env = "HALLOWEEN_MQTT_PASSWORD"
+
+[sources.remote]
+type = "cue-link"
+link = "radio"
+
+[assets.tractor_tip]
+type = "audio"
+file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
+
+[sinks.eye]
+type = "screen"
+screen_id = "tractor-eye"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[sinks.speaker]
+type = "audio"
+device = "jbl"
+volume = 0.70
+
+# Replace these three targets with the 12-digit node IDs printed by each board.
+[sinks.dc_a]
+type = "cue"
+link = "radio"
+target = "1CDBD45CFDF0"
+
+[sinks.dc_b]
+type = "cue"
+link = "radio"
+target = "1CDBD45CFF78"
+
+[sinks.stepper]
+type = "cue"
+link = "radio"
+target = "9070690BE79C"
+
+[server]
+bind = "0.0.0.0:8080"
+static_dir = "../../tractor-eye/dist"
+screen_id = "tractor-eye"
+
+[kiosk]
+enabled = true
+url = "http://127.0.0.1:8080/?screen=tractor-eye&name=Pi-eye&client=pi-eye"
+
+[flows.integration]
+trigger = { source = "remote", cue = "show:start" }
+
+[[flows.integration.nodes]]
+id = "wake-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" }, final_state = { mode = "alert", gaze = { x = -0.2, y = -0.5 } } }
+
+[[flows.integration.nodes]]
+id = "dc-a-pulse"
+at_ms = 500
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:fwd:70:500" }
+
+[[flows.integration.nodes]]
+id = "dc-b-pulse"
+at_ms = 750
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:rev:70:500" }
+
+[[flows.integration.nodes]]
+id = "stepper-turn"
+at_ms = 1000
+# Hardware-timed S-curve: 60 RPM peak, acceleration/deceleration from/to rest.
+action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60" }
+
+[flows.bench_audio]
+trigger = { source = "remote", cue = "bench:audio" }
+
+[[flows.bench_audio.nodes]]
+id = "play-full-audio"
+action = { type = "audio.play", sink = "speaker", asset = "tractor_tip" }
+
+[flows.bench_eye_wake]
+trigger = { source = "remote", cue = "bench:eye-wake" }
+
+[[flows.bench_eye_wake.nodes]]
+id = "wake-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" }, final_state = { mode = "tipping", gaze = { x = -0.25, y = -0.65 } } }
+
+[flows.bench_eye_reset]
+trigger = { source = "remote", cue = "bench:eye-reset" }
+
+[[flows.bench_eye_reset.nodes]]
+id = "reset-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[flows.stop_all]
+trigger = { source = "remote", cue = "show:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-dc-a"
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-dc-b"
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:stop" }
+
+[[flows.stop_all.nodes]]
+id = "stop-stepper"
+action = { type = "cue.emit", sink = "stepper", cue = "step:stop" }
+
+[[flows.stop_all.nodes]]
+id = "reset-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[controls.run_integration]
+type = "flow"
+label = "Run integration sequence"
+flow = "integration"
+
+[controls.stop_all]
+type = "flow"
+label = "STOP ALL"
+flow = "stop_all"
+
+[controls.audio_test]
+type = "flow"
+label = "Play full audio"
+flow = "bench_audio"
+key = "a"
+panel = "speaker"
+section = "bench"
+
+[controls.eye_wake_test]
+type = "flow"
+label = "Wake eye"
+flow = "bench_eye_wake"
+key = "e"
+panel = "tractor-eye"
+section = "bench"
+
+[controls.eye_reset]
+type = "flow"
+label = "Reset eye"
+flow = "bench_eye_reset"
+panel = "tractor-eye"
+section = "bench"
+
+[controls.dc_a_forward]
+type = "cue"
+label = "DC A forward"
+sink = "dc_a"
+cue = "dc:jog:fwd:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "w"
+
+[controls.dc_a_reverse]
+type = "cue"
+label = "DC A reverse"
+sink = "dc_a"
+cue = "dc:jog:rev:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "s"
+
+[controls.dc_b_forward]
+type = "cue"
+label = "DC B forward"
+sink = "dc_b"
+cue = "dc:jog:fwd:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "ArrowUp"
+
+[controls.dc_b_reverse]
+type = "cue"
+label = "DC B reverse"
+sink = "dc_b"
+cue = "dc:jog:rev:255"
+release_cue = "dc:stop"
+repeat_ms = 100
+expires_after_ms = 500
+key = "ArrowDown"
+
+[controls.stepper_stroke]
+type = "cue"
+label = "Stroke piston counter-clockwise (360°)"
+sink = "stepper"
+cue = "step:rev:1600:60"
+key = "Space"
+
+[controls.stepper_position_cw]
+type = "cue"
+label = "Position clockwise"
+sink = "stepper"
+cue = "step:jog:fwd:30"
+release_cue = "step:stop"
+repeat_ms = 100
+expires_after_ms = 500
+
+[controls.stepper_position_ccw]
+type = "cue"
+label = "Position counter-clockwise"
+sink = "stepper"
+cue = "step:jog:rev:30"
+release_cue = "step:stop"
+repeat_ms = 100
+expires_after_ms = 500
+
+[controls.stepper_stop]
+type = "cue"
+label = "Stop stepper"
+sink = "stepper"
+cue = "step:stop"
+
+

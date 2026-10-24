@@ -1,0 +1,16 @@
+[
+  {
+    "model": "rib-6-way",
+    "material": "petg",
+    "supports": false,
+    "layer_height_mm": 0.56,
+    "gcode_summary": [
+      "; model printing time: 1h 8m 6s; total estimated time: 1h 14m 27s",
+      "; total filament length [mm] : 10986.49",
+      "; total filament volume [cm^3] : 26425.60",
+      "; total filament weight [g] : 33.56"
+    ],
+    "model_time": "1h 8m 6s",
+    "filament_g": 33.56
+  }
+]

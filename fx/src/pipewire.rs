@@ -27,6 +27,34 @@ impl Default for PipeWire {
 }
 
 impl PipeWire {
+    pub fn playback_command(&self, request: &PlaybackRequest) -> Result<Command> {
+        if request
+            .options
+            .volume
+            .is_some_and(|volume| !(0.0..=1.0).contains(&volume))
+        {
+            return Err(FxError::InvalidPlayback(
+                "volume must be between 0 and 1".into(),
+            ));
+        }
+        let mut command = Command::new(&self.play_program);
+        if let DeviceSelector::Id(id) = &request.device {
+            command.arg("--target").arg(id);
+            // A missing/disconnected show output must not migrate to a different speaker.
+            command.arg("--properties").arg(
+                r#"{"node.dont-fallback":true,"node.dont-reconnect":true,"node.linger":false}"#,
+            );
+        }
+        if let Some(volume) = request.options.volume {
+            command.arg("--volume").arg(volume.to_string());
+        }
+        if let Some(latency) = &request.options.latency {
+            command.arg("--latency").arg(latency);
+        }
+        command.arg(&request.file);
+        Ok(command)
+    }
+
     pub fn with_programs(wpctl: impl Into<PathBuf>, pw_play: impl Into<PathBuf>) -> Self {
         Self {
             wpctl_program: wpctl.into(),
@@ -110,27 +138,7 @@ impl AudioSystem for PipeWire {
     }
 
     fn play(&self, request: &PlaybackRequest) -> Result<()> {
-        if let Some(volume) = request.options.volume
-            && !(0.0..=1.0).contains(&volume)
-        {
-            return Err(FxError::InvalidPlayback(format!(
-                "volume {volume} is outside 0.0..=1.0"
-            )));
-        }
-
-        let mut command = Command::new(&self.play_program);
-        if let DeviceSelector::Id(id) = &request.device {
-            command.arg("--target").arg(id);
-        }
-        if let Some(volume) = request.options.volume {
-            command.arg("--volume").arg(volume.to_string());
-        }
-        if let Some(latency) = &request.options.latency {
-            command.arg("--latency").arg(latency);
-        }
-        command.arg(&request.file);
-
-        let output = command.output()?;
+        let output = self.playback_command(request)?.output()?;
         if output.status.success() {
             Ok(())
         } else {
@@ -202,6 +210,32 @@ pub fn parse_devices(status: &str) -> Vec<AudioDevice> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_playback_target_disables_automatic_output_fallback() {
+        let request = PlaybackRequest::new(
+            "/tmp/test.wav",
+            DeviceSelector::Id("bluez_output.test".into()),
+        );
+        let command = PipeWire::default().playback_command(&request).unwrap();
+        let arguments: Vec<_> = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            arguments
+                .windows(2)
+                .any(|pair| pair == ["--target", "bluez_output.test"])
+        );
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument.contains("node.dont-fallback"))
+        );
+        let mut invalid = request;
+        invalid.options.volume = Some(1.1);
+        assert!(PipeWire::default().playback_command(&invalid).is_err());
+    }
 
     #[test]
     fn parses_audio_devices_from_wpctl_status() {

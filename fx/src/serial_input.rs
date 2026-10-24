@@ -1,10 +1,8 @@
 use std::{
-    collections::{HashSet, VecDeque},
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc as std_mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -12,82 +10,14 @@ use std::{
 use fx_audio::{FxError, Result};
 use tokio::sync::mpsc;
 
+#[cfg(test)]
+use crate::cue_link::EventDeduper;
+use crate::cue_link::{CueLinkSender, EventMessage};
+
 const SERIAL_BY_ID: &str = "/dev/serial/by-id";
 
 pub struct SerialLines {
     reader: BufReader<File>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EventMessage {
-    pub link: Option<String>,
-    pub event: String,
-    pub sequence: Option<u64>,
-    pub source: Option<String>,
-    pub rssi: Option<i64>,
-}
-
-#[derive(Debug)]
-struct OutgoingCue {
-    event: String,
-    expires_at: Instant,
-}
-
-#[derive(Clone)]
-pub struct CueLinkSender {
-    sender: std_mpsc::SyncSender<OutgoingCue>,
-}
-
-impl CueLinkSender {
-    pub fn try_emit(&self, event: String, lifetime: Duration) -> Result<()> {
-        self.sender
-            .try_send(OutgoingCue {
-                event,
-                expires_at: Instant::now() + lifetime,
-            })
-            .map_err(|error| FxError::Serial(format!("cue transmit queue unavailable: {error}")))
-    }
-}
-
-pub struct EventDeduper {
-    capacity: usize,
-    seen: HashSet<(Option<String>, Option<String>, String, u64)>,
-    order: VecDeque<(Option<String>, Option<String>, String, u64)>,
-}
-
-impl EventDeduper {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            seen: HashSet::new(),
-            order: VecDeque::new(),
-        }
-    }
-
-    /// Returns true only when the same event and sequence were already observed.
-    pub fn is_duplicate(&mut self, message: &EventMessage) -> bool {
-        let Some(sequence) = message.sequence else {
-            return false;
-        };
-        let key = (
-            message.link.clone(),
-            message.source.clone(),
-            message.event.clone(),
-            sequence,
-        );
-        if self.seen.contains(&key) {
-            return true;
-        }
-
-        self.seen.insert(key.clone());
-        self.order.push_back(key);
-        while self.order.len() > self.capacity {
-            if let Some(expired) = self.order.pop_front() {
-                self.seen.remove(&expired);
-            }
-        }
-        false
-    }
 }
 
 /// Owns one bidirectional serial Cue link. Incoming Cue JSON is normalized onto
@@ -100,15 +30,11 @@ pub fn spawn_reconnecting_link(
     capacity: usize,
 ) -> (mpsc::Receiver<EventMessage>, CueLinkSender) {
     let (event_sender, event_receiver) = mpsc::channel(capacity);
-    let (outgoing_sender, outgoing_receiver) = std_mpsc::sync_channel(capacity);
-    let handle = CueLinkSender {
-        sender: outgoing_sender,
-    };
+    let (handle, outgoing_receiver) = CueLinkSender::channel(capacity);
     thread::Builder::new()
         .name(format!("fx-cue-{link_name}"))
         .spawn(move || {
             let mut retry_delay = Duration::from_millis(250);
-            let mut request_id = 0_u64;
             loop {
                 let port = match select(explicit_port.clone()) {
                     Ok(port) => port,
@@ -146,8 +72,9 @@ pub fn spawn_reconnecting_link(
                             );
                             continue;
                         }
-                        request_id = request_id.wrapping_add(1).max(1);
-                        if let Err(error) = connection.emit(request_id, &outgoing.event) {
+                        if let Err(error) =
+                            connection.emit(outgoing.id, &outgoing.destination, &outgoing.event)
+                        {
                             crate::fx_log!(
                                 "cue link `{link_name}` write failed: {error}; reconnecting"
                             );
@@ -210,8 +137,9 @@ impl CueSerial {
         })
     }
 
-    fn emit(&mut self, request: u64, event: &str) -> Result<()> {
-        self.file.write_all(&emit_command(request, event)?)?;
+    fn emit(&mut self, request: u64, destination: &str, event: &str) -> Result<()> {
+        self.file
+            .write_all(&emit_command(request, destination, event)?)?;
         self.file.flush()?;
         Ok(())
     }
@@ -240,10 +168,12 @@ impl CueSerial {
     }
 }
 
-fn emit_command(request: u64, event: &str) -> Result<Vec<u8>> {
+fn emit_command(request: u64, destination: &str, event: &str) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(&serde_json::json!({
         "type": "emit",
         "request": request,
+        "message_id": request,
+        "destination": destination,
         "event": event,
     }))
     .map_err(|error| FxError::Serial(format!("could not encode cue command: {error}")))?;
@@ -304,15 +234,28 @@ pub fn select(explicit: Option<PathBuf>) -> Result<PathBuf> {
 
 pub fn event_message(line: &str) -> Option<EventMessage> {
     let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+    let is_peer = value.get("type").and_then(serde_json::Value::as_str) == Some("peer");
     Some(EventMessage {
         link: None,
-        event: value.get("event")?.as_str()?.to_string(),
+        event: if is_peer {
+            "system:peer".into()
+        } else {
+            value.get("event")?.as_str()?.to_string()
+        },
         sequence: value.get("sequence").and_then(serde_json::Value::as_u64),
         source: value
-            .get("source")
+            .get(if is_peer { "node" } else { "source" })
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
         rssi: value.get("rssi").and_then(serde_json::Value::as_i64),
+        service: value
+            .get("service")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        transport: value
+            .get("transport")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -386,11 +329,12 @@ mod tests {
 
     #[test]
     fn emits_the_gateway_newline_json_contract() {
-        let bytes = emit_command(42, "tractor:stepper:stroke").unwrap();
+        let bytes = emit_command(42, "AABBCCDDEEFF", "tractor:stepper:stroke").unwrap();
         assert_eq!(bytes.last(), Some(&b'\n'));
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["type"], "emit");
         assert_eq!(value["request"], 42);
+        assert_eq!(value["destination"], "AABBCCDDEEFF");
         assert_eq!(value["event"], "tractor:stepper:stroke");
     }
 
@@ -403,20 +347,16 @@ mod tests {
             sequence: Some(7),
             source: Some("AABBCCDDEEFF".into()),
             rssi: Some(-67),
+            service: None,
+            transport: None,
         };
         let different_event = EventMessage {
-            link: first.link.clone(),
             event: "tractor:moo".into(),
-            sequence: Some(7),
-            source: first.source.clone(),
-            rssi: first.rssi,
+            ..first.clone()
         };
         let different_sequence = EventMessage {
-            link: first.link.clone(),
-            event: "horn:pushed".into(),
             sequence: Some(8),
-            source: first.source.clone(),
-            rssi: first.rssi,
+            ..first.clone()
         };
         let different_source = EventMessage {
             source: Some("112233445566".into()),
@@ -428,5 +368,18 @@ mod tests {
         assert!(!deduper.is_duplicate(&different_event));
         assert!(!deduper.is_duplicate(&different_sequence));
         assert!(!deduper.is_duplicate(&different_source));
+    }
+
+    #[test]
+    fn extracts_peer_declarations() {
+        let message = event_message(
+            r#"{"type":"peer","node":"AABBCCDDEEFF","service":"dc-motor","transport":"esp-now","rssi":-61}"#,
+        )
+        .unwrap();
+        assert_eq!(message.event, "system:peer");
+        assert_eq!(message.source.as_deref(), Some("AABBCCDDEEFF"));
+        assert_eq!(message.service.as_deref(), Some("dc-motor"));
+        assert_eq!(message.transport.as_deref(), Some("esp-now"));
+        assert_eq!(message.rssi, Some(-61));
     }
 }

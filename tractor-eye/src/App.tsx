@@ -10,6 +10,8 @@ import { wakeSequenceSource } from './sources/wake-sequence-source'
 import { createRuntimeWebSocketSource } from './sources/runtime-websocket-source'
 import { createConnectionReporter } from './network/diagnostics'
 import { EyeDiagnostics } from './display/EyeDiagnostics'
+import { ControlPanel } from './control/ControlPanel'
+import { displayIdentity } from './network/display-identity'
 import {
   loadDisplayCalibration,
   loadDiagnosticsPreference,
@@ -21,6 +23,11 @@ import { reduceCalibration, type CalibrationAction } from './display/calibration
 import './App.css'
 
 function App() {
+  if (window.location.pathname.startsWith('/control')) return <ControlPanel />
+  return <EyeApp />
+}
+
+function EyeApp() {
   const commandBus = useMemo(() => new AnimationCommandBus(), [])
   const [eyeState, dispatch] = useReducer(
     reduceEyeCommand,
@@ -41,6 +48,7 @@ function App() {
 
   useEffect(() => createRuntimeWebSocketSource({
     pageUrl: window.location.href,
+    ...displayIdentity(window.location.href),
     onStatus: createConnectionReporter(),
   }).start(commandBus), [commandBus])
 

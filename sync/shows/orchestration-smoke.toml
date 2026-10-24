@@ -1,0 +1,65 @@
+version = 2
+name = "orchestration-smoke"
+
+[links.radio]
+type = "mqtt-cue"
+host = "mqtt.dylfi"
+node = "0200000000FE"
+client_id = "fx-orchestration-smoke"
+topic_prefix = "halloween-smoke"
+
+[sources.remote]
+type = "cue-link"
+link = "radio"
+
+[sinks.fake_motor]
+type = "cue"
+link = "radio"
+target = "001122334455"
+
+[sinks.left]
+type = "screen"
+screen_id = "left"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[sinks.right]
+type = "screen"
+screen_id = "right"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[server]
+bind = "0.0.0.0:18080"
+static_dir = "../../tractor-eye/dist"
+screen_id = "left"
+
+[flows.smoke]
+trigger = { source = "remote", cue = "test:start" }
+
+[[flows.smoke.nodes]]
+id = "raise"
+action = { type = "cue.emit", sink = "fake_motor", cue = "dc:fwd:70:100", wait_for = "dc:limit:fwd", timeout_ms = 10000 }
+
+[[flows.smoke.nodes]]
+id = "left"
+after = ["raise"]
+action = { type = "screen.command", sink = "left", command = { type = "eye/wake" }, final_state = { mode = "tipping", gaze = { x = -0.25, y = -0.65 } } }
+
+[[flows.smoke.nodes]]
+id = "right"
+after = ["raise"]
+action = { type = "screen.command", sink = "right", command = { type = "eye/wake" }, final_state = { mode = "tipping", gaze = { x = 0.25, y = -0.65 } } }
+
+[[flows.smoke.nodes]]
+id = "reset-left"
+after = ["left", "right"]
+action = { type = "screen.command", sink = "left", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[[flows.smoke.nodes]]
+id = "reset-right"
+after = ["left", "right"]
+action = { type = "screen.command", sink = "right", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[controls.run_smoke]
+type = "flow"
+label = "Run isolated orchestration smoke test"
+flow = "smoke"

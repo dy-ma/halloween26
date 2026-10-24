@@ -1,0 +1,83 @@
+{
+  "layer_height_mm": 0.4,
+  "material": "Bambu PLA Basic",
+  "project": "dome-hub-batches.3mf",
+  "requested": {
+    "6-way": 10,
+    "5-way": 6,
+    "4-way-A": 5,
+    "4-way-B": 5
+  },
+  "plates": [
+    {
+      "plate": 1,
+      "objects": {
+        "cloth-6-way.stl": 10,
+        "cloth-5-way.stl": 4
+      },
+      "count": 14,
+      "total_time_seconds": 29846,
+      "weight_g": 511.93,
+      "outside": "false",
+      "support_used": "false",
+      "gcode_summary": [
+        "; model printing time: 8h 11m 13s; total estimated time: 8h 17m 26s",
+        "; total filament weight [g] : 511.93"
+      ],
+      "bounds_mm": [
+        1.00007,
+        3.58794,
+        254.99988000000002,
+        252.41201
+      ],
+      "warnings": [
+        {
+          "msg": "not_support_traditional_timelapse",
+          "level": "2",
+          "error_code": "10018003"
+        },
+        {
+          "msg": "not_support_traditional_timelapse",
+          "level": "3",
+          "error_code": "1000C003"
+        }
+      ]
+    },
+    {
+      "plate": 2,
+      "objects": {
+        "cloth-5-way.stl": 2,
+        "cloth-4-way-B.stl": 5,
+        "cloth-4-way-A.stl": 5
+      },
+      "count": 12,
+      "total_time_seconds": 20202,
+      "weight_g": 348.11,
+      "outside": "false",
+      "support_used": "false",
+      "gcode_summary": [
+        "; model printing time: 5h 30m 28s; total estimated time: 5h 36m 42s",
+        "; total filament weight [g] : 348.11"
+      ],
+      "bounds_mm": [
+        29.976070000000004,
+        25.19958,
+        226.02397000000002,
+        230.80044
+      ],
+      "warnings": [
+        {
+          "msg": "not_support_traditional_timelapse",
+          "level": "2",
+          "error_code": "10018003"
+        },
+        {
+          "msg": "not_support_traditional_timelapse",
+          "level": "3",
+          "error_code": "1000C003"
+        }
+      ]
+    }
+  ],
+  "build_instances": 26
+}

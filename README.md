@@ -1,5 +1,9 @@
 # Halloween 2026
 
+The integrated wireless show controller, motor-node firmware, simulator, and Pi
+control panel live in [`sync/`](sync/README.md). The original sketches remain
+available as isolated hardware tests.
+
 Hardware, software, and build notes for our Halloween 2026 props. This repository holds multiple boards and projects; each has its own directory, README, and design status.
 
 ## Projects

@@ -3,6 +3,15 @@ import { test } from 'node:test'
 import { AnimationCommandBus } from '../src/commands/command-bus.ts'
 import { createInitialEyeState, reduceEyeCommand } from '../src/features/eye/eye-state.ts'
 import { wakeSequenceSource } from '../src/sources/wake-sequence-source.ts'
+import { wakeMilestones, wakeTiming } from '../src/sources/wake-timing.ts'
+
+test('dashboard milestones use the actual sequence timing and shift with wake', () => {
+  assert.deepEqual(wakeMilestones(750).map(marker => [marker.label, marker.timeMs]), [
+    ['Wake', 750], ['Opens', 930], ['Tip look', 4750], ['Look settled', 7150],
+  ])
+  assert.equal(wakeTiming.openDelayMs + wakeTiming.openDurationMs, wakeTiming.alertDelayMs)
+  assert.equal(wakeMilestones(2000)[2].timeMs, 6000)
+})
 
 function setup() {
   const bus = new AnimationCommandBus()

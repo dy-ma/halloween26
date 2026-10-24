@@ -47,7 +47,7 @@ Packet makeAckPacket(
   int8_t reported_rssi,
   bool has_reported_rssi
 );
-Packet makeHelloPacket(uint64_t source);
+Packet makeHelloPacket(uint64_t source, const char *service = nullptr);
 
 template <size_t Capacity>
 class DuplicateCache {
