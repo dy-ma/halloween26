@@ -1,0 +1,116 @@
+version = 2
+name = "horn-smoke"
+
+[playback]
+max_active = 4
+dedupe_capacity = 64
+resident_latency_ms = 20
+
+[links.inbound]
+type = "mqtt-cue"
+host = "mqtt.dylfi"
+node = "0200000000FD"
+client_id = "fx-horn-smoke"
+topic_prefix = "halloween-horn-smoke"
+
+[links.fake]
+type = "simulated-cue"
+
+[sources.horn]
+type = "cue-link"
+link = "inbound"
+
+[assets.horn]
+type = "audio"
+file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
+
+# A ready but normally unconnected Pi output. The action is muted, and this
+# isolated profile never selects the production JBL alias.
+[sinks.test_audio]
+type = "audio"
+device = "alsa_output.platform-fe00b840.mailbox.stereo-fallback"
+volume = 0.0
+
+[sinks.eye]
+type = "screen"
+screen_id = "horn-smoke-eye"
+initial_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } }
+
+[sinks.fake_lift]
+type = "cue"
+link = "fake"
+target = "fake-lift"
+
+[props.lift]
+label = "Smoke lift"
+initial = "unknown"
+ready = "low"
+states = ["unknown", "homing", "low", "raising", "high", "fault"]
+
+[props.lift.transitions.home]
+from = ["unknown", "low", "high", "fault"]
+active = "homing"
+to = "low"
+failure = "fault"
+
+[props.lift.transitions.raise]
+from = ["low"]
+active = "raising"
+to = "high"
+failure = "fault"
+
+[server]
+bind = "127.0.0.1:18083"
+static_dir = "../../tractor-eye/dist"
+screen_id = "horn-smoke-eye"
+
+[kiosk]
+enabled = false
+
+[flows.horn_audio]
+trigger = { source = "horn", cue = "horn:pushed" }
+
+[[flows.horn_audio.nodes]]
+id = "horn"
+action = { type = "audio.trigger", sink = "test_audio", asset = "horn", volume = 0.0 }
+
+[flows.show]
+trigger = { source = "horn", cue = "horn:pushed", aliases = ["show:start"] }
+role = "show"
+
+[[flows.show.nodes]]
+id = "wake"
+action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" }, final_state = { mode = "alert", gaze = { x = -0.2, y = -0.5 } } }
+
+[[flows.show.nodes]]
+id = "raise"
+at_ms = 100
+transition = "lift.raise"
+action = { type = "cue.emit", sink = "fake_lift", cue = "dc:fwd:70:100" }
+
+[flows.reset]
+trigger = { source = "horn", cue = "show:reset" }
+role = "reset"
+
+[[flows.reset.nodes]]
+id = "home"
+transition = "lift.home"
+action = { type = "cue.emit", sink = "fake_lift", cue = "dc:rev:70:100" }
+
+[controls.reset]
+type = "flow"
+label = "Reset smoke state"
+flow = "reset"
+
+[flows.stop]
+trigger = { source = "horn", cue = "show:stop" }
+role = "stop"
+
+[[flows.stop.nodes]]
+id = "eye"
+action = { type = "screen.command", sink = "eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
+
+[controls.stop]
+type = "flow"
+label = "Stop smoke run"
+flow = "stop"

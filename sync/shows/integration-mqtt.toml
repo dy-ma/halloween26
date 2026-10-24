@@ -4,6 +4,9 @@ name = "integration-mqtt"
 [playback]
 max_active = 8
 dedupe_capacity = 512
+# The horn uses a predecoded resident stream. PipeWire mixes normal song
+# playback alongside it; the open stream also keeps the Bluetooth path awake.
+resident_latency_ms = 20
 
 [links.radio]
 type = "mqtt-cue"
@@ -110,7 +113,7 @@ enabled = true
 url = "http://127.0.0.1:8080/?screen=tractor-eye&name=Pi-eye&client=pi-eye"
 
 [flows.integration]
-trigger = { source = "remote", cue = "show:start" }
+trigger = { source = "remote", cue = "horn:pushed", aliases = ["show:start"] }
 role = "show"
 
 [[flows.integration.nodes]]
@@ -135,6 +138,16 @@ at_ms = 1000
 # Hardware-timed S-curve: 60 RPM peak, acceleration/deceleration from/to rest.
 transition = "smokestack.stroke"
 action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60", wait_for = "step:complete", timeout_ms = 4000 }
+
+# The same physical press takes two independent paths. This utility flow is
+# dispatched before the state-gated show flow, so the horn sounds even when
+# the controller rejects the choreography because it is not Ready.
+[flows.horn_audio]
+trigger = { source = "remote", cue = "horn:pushed" }
+
+[[flows.horn_audio.nodes]]
+id = "play-horn"
+action = { type = "audio.trigger", sink = "speaker", asset = "tractor_tip" }
 
 [flows.reset]
 trigger = { source = "remote", cue = "show:reset" }

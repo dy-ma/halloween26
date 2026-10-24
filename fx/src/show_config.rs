@@ -199,6 +199,11 @@ pub struct FlowConfig {
 pub struct TriggerConfig {
     pub source: String,
     pub cue: String,
+    /// Additional wire events that start the same flow. This keeps the
+    /// choreography single-sourced while allowing a physical trigger and a
+    /// legacy/operator trigger to coexist.
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -249,6 +254,16 @@ pub struct TransitionConfig {
 pub enum ActionConfig {
     #[serde(rename = "audio.play")]
     AudioPlay {
+        sink: String,
+        asset: String,
+        /// Overrides the audio sink's default volume.
+        volume: Option<f32>,
+    },
+    /// Low-latency playback through a resident, pre-warmed PCM channel.
+    /// Intended for short interaction sounds such as the horn; normal music
+    /// and dependency-aware tracks should continue to use `audio.play`.
+    #[serde(rename = "audio.trigger")]
+    AudioTrigger {
         sink: String,
         asset: String,
         /// Overrides the audio sink's default volume.
@@ -324,6 +339,9 @@ pub struct PlaybackConfig {
     pub max_active: usize,
     #[serde(default = "default_dedupe_capacity")]
     pub dedupe_capacity: usize,
+    /// Requested PipeWire latency for resident interaction channels.
+    #[serde(default = "default_resident_latency_ms")]
+    pub resident_latency_ms: u16,
 }
 
 impl Default for PlaybackConfig {
@@ -331,6 +349,7 @@ impl Default for PlaybackConfig {
         Self {
             max_active: default_max_active(),
             dedupe_capacity: default_dedupe_capacity(),
+            resident_latency_ms: default_resident_latency_ms(),
         }
     }
 }
@@ -436,6 +455,11 @@ fn validate(config: &ShowConfig) -> Result<()> {
     if config.playback.max_active == 0 || config.playback.dedupe_capacity == 0 {
         return Err(FxError::ShowConfig(
             "playback.max_active and playback.dedupe_capacity must be non-zero".into(),
+        ));
+    }
+    if !(5..=100).contains(&config.playback.resident_latency_ms) {
+        return Err(FxError::ShowConfig(
+            "playback.resident_latency_ms must be between 5 and 100".into(),
         ));
     }
 
@@ -728,6 +752,18 @@ fn validate_flow(config: &ShowConfig, flow_name: &str, flow: &FlowConfig) -> Res
         &format!("flows.{flow_name}.trigger.source"),
     )?;
     validate_cue_name(&flow.trigger.cue, &format!("flows.{flow_name}.trigger.cue"))?;
+    let mut trigger_cues = BTreeSet::from([flow.trigger.cue.as_str()]);
+    for (index, alias) in flow.trigger.aliases.iter().enumerate() {
+        validate_cue_name(
+            alias,
+            &format!("flows.{flow_name}.trigger.aliases[{index}]"),
+        )?;
+        if !trigger_cues.insert(alias) {
+            return Err(FxError::ShowConfig(format!(
+                "flows.{flow_name}.trigger contains duplicate cue `{alias}`"
+            )));
+        }
+    }
     if flow.nodes.is_empty() {
         return Err(FxError::ShowConfig(format!(
             "flows.{flow_name} must contain at least one node"
@@ -808,6 +844,11 @@ fn validate_action(config: &ShowConfig, flow_name: &str, node: &NodeConfig) -> R
     let field = format!("flows.{flow_name}.nodes.{}.action", node.id);
     match &node.action {
         ActionConfig::AudioPlay {
+            sink,
+            asset,
+            volume,
+        }
+        | ActionConfig::AudioTrigger {
             sink,
             asset,
             volume,
@@ -963,6 +1004,10 @@ fn is_node_id(value: &str) -> bool {
 }
 const fn default_max_active() -> usize {
     16
+}
+
+const fn default_resident_latency_ms() -> u16 {
+    20
 }
 const fn default_dedupe_capacity() -> usize {
     4096

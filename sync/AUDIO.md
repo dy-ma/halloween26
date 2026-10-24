@@ -29,6 +29,46 @@ Loss or replacement of a selected output fails its active voices rather than
 leaving a dependency waiting indefinitely. STOP ALL also invalidates starts
 still waiting on discovery, so an old request cannot start sound afterward.
 
+## Immediate interaction sounds
+
+Use `audio.trigger` for a short sound that must react to a physical input. FX
+decodes those WAV assets at startup and maintains one 48 kHz stereo PipeWire
+stream for every referenced output. The stream continuously supplies silence,
+which keeps the Bluetooth audio path active; a trigger mixes the predecoded
+samples into that stream without starting a process or opening a file. The
+default requested PipeWire latency is 20 ms and can be changed with
+`playback.resident_latency_ms` in the bounded 5–100 ms range. A Bluetooth sink
+may impose a larger codec/radio buffer than PipeWire requests.
+
+Resident clips must be 16-bit PCM WAV, mono or stereo. They are converted to
+48 kHz stereo at startup. Normal `audio.play` voices—including a future looping
+background song—remain separate PipeWire streams and mix with the resident
+channel. The always-open silent stream keeps the transport awake; actual
+background audio may additionally prevent a speaker's own silence gate or
+amplifier sleep from engaging.
+
+The production horn deliberately uses two flows with the same incoming
+`horn:pushed` event:
+
+```toml
+[flows.horn_audio]
+trigger = { source = "remote", cue = "horn:pushed" }
+
+[[flows.horn_audio.nodes]]
+id = "horn"
+action = { type = "audio.trigger", sink = "speaker", asset = "horn" }
+
+[flows.show]
+trigger = { source = "remote", cue = "horn:pushed", aliases = ["show:start"] }
+role = "show"
+```
+
+Utility flows are dispatched before stateful flows. Consequently the horn is
+direct feedback and sounds even when the controller rejects the show request;
+the eye and physical assemblies still run only when the controller is Ready.
+The Cue event ID is deduplicated before either branch, so an MQTT retry cannot
+play the horn or start the show twice.
+
 ## Library and future clips
 
 The show asset map is the track catalog, with stable IDs separate from outputs:
@@ -112,3 +152,10 @@ tracks/output routing, shared capacity, Stop, natural completion, volume,
 unknown-target rejection, and audio-dependent DAG behavior without sending
 sound to a real speaker. Use a separate `FX_DISPLAY_REGISTRY` for this test
 instance as with the orchestration smoke profile.
+
+`sync/shows/horn-smoke.toml` plus `tractor-eye/scripts/verify-horn.mjs`
+exercise the complete physical-event semantics through an isolated MQTT topic:
+resident audio fires while the state machine rejects an unready show, a reset
+permits the next show, timing is honored, and a duplicate event starts neither
+branch twice. The fixture uses a simulated motor and a muted Pi output, never
+the JBL alias.

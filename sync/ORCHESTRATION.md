@@ -146,6 +146,13 @@ invalidate position assumptions and require another reset. The complete state
 snapshot, including pending transitions and their execution times, is available
 through `/api/status` for the future graph UI.
 
+One wire event may intentionally match multiple flows. Utility flows dispatch
+first, then stateful flows. The horn uses this to split one `horn:pushed` packet
+into immediate resident audio and a separate `show` request: audio feedback is
+not permission-gated, while choreography remains accepted only from Ready.
+Trigger `aliases` allow the same choreography to retain an operator/legacy cue
+without copying its node graph.
+
 The dashboard has a fixed-height scrolling activity log of the latest 500
 events: workflow starts, action state changes, completion/failure details,
 and changed assembly reports. Repeated identical input snapshots do not

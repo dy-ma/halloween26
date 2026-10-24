@@ -13,6 +13,9 @@ Future work and field observations are tracked in [BACKLOG.md](BACKLOG.md).
   results plus incoming board events.
 - `sync-remote`: battery/remote XIAO. Its start button sends `show:start` and an
   optional second button sends `show:stop` to the configured gateway node.
+- `sync-horn-mqtt`: single-switch XIAO for the physical horn. A debounced press
+  on D6 sends `horn:pushed` to the Pi. Wire a normally-open switch between D6
+  and GND; the firmware uses `INPUT_PULLUP` and triggers on the falling edge.
 - `sync-dc`: flash the same image onto both BTS7960 controller boards. Their MAC
   addresses distinguish `dc_a` from `dc_b` in the show file.
 - `sync-dc-expansion`: wireless-only DC firmware for the six-wire BTS7960
@@ -246,9 +249,9 @@ also works when the Pi hostname and mDNS service use the default name.
    pio run -d sync/firmware -e sync-stepper
    ```
 
-   The parallel MQTT images are `sync-remote-mqtt`, `sync-dc-mqtt`,
-   `sync-dc-expansion-mqtt`, and `sync-stepper-mqtt`. They are additions, not
-   replacements for the ESP-NOW environments.
+   The parallel MQTT images are `sync-remote-mqtt`, `sync-horn-mqtt`,
+   `sync-dc-mqtt`, `sync-dc-expansion-mqtt`, and `sync-stepper-mqtt`. They are
+   additions, not replacements for the ESP-NOW environments.
 
    Arduino CLI wrappers are also included and are what the repository build was
    verified with. For example, flash the Pi gateway with:

@@ -1,7 +1,7 @@
 //! Named source tracks, discovered physical outputs, and independently stoppable voices.
 use crate::{
     aliases::DeviceAliases,
-    show_config::{ShowConfig, SinkConfig},
+    show_config::{ActionConfig, ShowConfig, SinkConfig},
     workflow::{WorkflowHub, now_ms},
 };
 use fx_audio::{
@@ -11,16 +11,21 @@ use fx_audio::{
 };
 use serde::Serialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     process::Stdio,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio::{
+    io::AsyncWriteExt,
     process::Command,
-    sync::{Semaphore, watch},
+    sync::{Semaphore, mpsc, oneshot, watch},
 };
+
+const RESIDENT_RATE: u32 = 48_000;
+const RESIDENT_CHANNELS: usize = 2;
+const RESIDENT_CHUNK_MS: u64 = 10;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +38,8 @@ pub struct Track {
     pub duration_ms: Option<u64>,
     #[serde(skip)]
     file: PathBuf,
+    #[serde(skip)]
+    resident: Option<Arc<ResidentClip>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -70,6 +77,36 @@ struct Voice {
     status: Playback,
     stop: watch::Sender<bool>,
 }
+
+#[derive(Clone)]
+struct ResidentClip {
+    samples: Arc<[i16]>,
+}
+
+struct ResidentVoice {
+    samples: Arc<[i16]>,
+    cursor: usize,
+    volume: f32,
+    done: oneshot::Sender<Result<String, String>>,
+}
+
+enum ResidentCommand {
+    Play {
+        id: String,
+        clip: Arc<ResidentClip>,
+        volume: f32,
+        done: oneshot::Sender<Result<String, String>>,
+    },
+    Stop {
+        id: String,
+    },
+}
+
+#[derive(Clone)]
+struct ResidentChannel {
+    backend: String,
+    commands: mpsc::Sender<ResidentCommand>,
+}
 struct Inner {
     outputs: Vec<Output>,
     errors: Vec<String>,
@@ -97,6 +134,9 @@ pub struct AudioRuntime {
     refresh_lock: Arc<tokio::sync::Mutex<()>>,
     slots: Arc<Semaphore>,
     max_active: usize,
+    resident_sinks: Arc<BTreeSet<String>>,
+    resident_channels: Arc<tokio::sync::Mutex<BTreeMap<String, ResidentChannel>>>,
+    resident_latency_ms: u16,
 }
 
 pub struct Ticket {
@@ -120,12 +160,32 @@ impl Ticket {
 impl AudioRuntime {
     pub fn new(show: &ShowConfig, slots: Arc<Semaphore>) -> fx_audio::Result<Self> {
         let aliases = DeviceAliases::load_default()?;
+        let mut resident_assets = BTreeSet::new();
+        let mut resident_sinks = BTreeSet::new();
+        for flow in show.flows.values() {
+            for node in &flow.nodes {
+                if let ActionConfig::AudioTrigger { sink, asset, .. } = &node.action {
+                    resident_assets.insert(asset.clone());
+                    resident_sinks.insert(sink.clone());
+                }
+            }
+        }
         let tracks = show
             .assets
             .iter()
-            .map(|(id, asset)| {
+            .map(|(id, asset)| -> fx_audio::Result<_> {
                 let file = asset.audio_file().to_path_buf();
-                (
+                let resident = resident_assets
+                    .contains(id)
+                    .then(|| decode_resident_wav(&file))
+                    .transpose()
+                    .map_err(|error| {
+                        fx_audio::FxError::ShowConfig(format!(
+                            "resident audio asset `{id}` is incompatible: {error}"
+                        ))
+                    })?
+                    .map(Arc::new);
+                Ok((
                     id.clone(),
                     Track {
                         id: id.clone(),
@@ -143,10 +203,11 @@ impl AudioRuntime {
                         available: file.is_file(),
                         duration_ms: std::fs::File::open(&file).ok().and_then(wav_duration),
                         file,
+                        resident,
                     },
-                )
+                ))
             })
-            .collect();
+            .collect::<fx_audio::Result<BTreeMap<_, _>>>()?;
         let bindings = show
             .sinks
             .iter()
@@ -170,7 +231,39 @@ impl AudioRuntime {
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             slots,
             max_active: show.playback.max_active,
+            resident_sinks: Arc::new(resident_sinks),
+            resident_channels: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            resident_latency_ms: show.playback.resident_latency_ms,
         })
+    }
+
+    /// Keep all outputs used by `audio.trigger` warm. Discovery also stays
+    /// hot, so an interaction does not wait for bluetoothctl/wpctl probes.
+    pub fn start_resident_channels(&self) {
+        if self.resident_sinks.is_empty() {
+            return;
+        }
+        let runtime = self.clone();
+        tokio::spawn(async move {
+            loop {
+                for sink in runtime.resident_sinks.iter() {
+                    match runtime.output(sink).await {
+                        Ok(output) if output.ready => {
+                            if let Err(error) = runtime.ensure_resident_channel(&output).await {
+                                crate::fx_log!(
+                                    "resident audio channel `{sink}` unavailable: {error}"
+                                );
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            crate::fx_log!("resident audio output `{sink}` unavailable: {error}")
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        });
     }
 
     async fn refresh(&self) {
@@ -368,6 +461,128 @@ impl AudioRuntime {
         let generation = self.inner.lock().unwrap().stop_generation;
         self.play_in_generation(track, target, volume, log, generation)
             .await
+    }
+
+    /// Starts a predecoded clip on an already-open low-latency output stream.
+    /// This is the interaction hot path; it deliberately avoids launching a
+    /// process or touching the filesystem in response to the trigger.
+    pub async fn trigger(
+        &self,
+        track: &str,
+        target: &str,
+        volume: Option<f32>,
+        log: &WorkflowHub,
+    ) -> Result<Ticket, String> {
+        let generation = self.inner.lock().unwrap().stop_generation;
+        let track = self.tracks.get(track).ok_or("unknown audio track")?;
+        let clip = track
+            .resident
+            .clone()
+            .ok_or("audio track was not preloaded for resident playback")?;
+        let output = self.output(target).await?;
+        if !output.ready {
+            return Err(format!("{} is not ready for audio", output.label));
+        }
+        let channel = self.ensure_resident_channel(&output).await?;
+        let permit = self
+            .slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| "all audio playback slots are active")?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (stop, mut stopping) = watch::channel(false);
+        let (done, receiver) = watch::channel(None);
+        let (resident_done, mut resident_result) = oneshot::channel();
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.stop_generation != generation {
+                return Err("audio start cancelled by STOP ALL".into());
+            }
+            channel
+                .commands
+                .try_send(ResidentCommand::Play {
+                    id: id.clone(),
+                    clip,
+                    volume: volume.unwrap_or(1.0),
+                    done: resident_done,
+                })
+                .map_err(|error| format!("resident audio channel unavailable: {error}"))?;
+            while inner.voices.len() >= 128 {
+                let oldest = inner
+                    .voices
+                    .iter()
+                    .filter(|(_, voice)| voice.status.phase != "playing")
+                    .min_by_key(|(_, voice)| voice.status.started_at_ms)
+                    .map(|(id, _)| id.clone());
+                if let Some(oldest) = oldest {
+                    inner.voices.remove(&oldest);
+                } else {
+                    break;
+                }
+            }
+            inner.voices.insert(
+                id.clone(),
+                Voice {
+                    stop,
+                    status: Playback {
+                        id: id.clone(),
+                        track: track.id.clone(),
+                        output: output.id.clone(),
+                        phase: "playing",
+                        started_at_ms: now_ms(),
+                        detail: format!("{} → {} (resident)", track.label, output.label),
+                    },
+                },
+            );
+        }
+        log.note_kind(
+            "audio",
+            format!("Audio {id}: {} → {} (resident)", track.label, output.label),
+        );
+        let runtime = self.clone();
+        let playback_id = id.clone();
+        let commands = channel.commands.clone();
+        let log = log.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            let result = tokio::select! {
+                result = &mut resident_result => result
+                    .unwrap_or_else(|_| Err("resident audio channel stopped".into())),
+                _ = stopping.changed() => {
+                    let _ = commands.send(ResidentCommand::Stop { id: playback_id.clone() }).await;
+                    resident_result.await
+                        .unwrap_or_else(|_| Err("resident audio channel stopped".into()))
+                }
+            };
+            let phase = match &result {
+                Ok(_) => "finished",
+                Err(error) if error == "audio stopped by operator" => "stopped",
+                Err(_) => "failed",
+            };
+            let detail = result.clone().unwrap_or_else(|error| error);
+            if let Some(voice) = runtime.inner.lock().unwrap().voices.get_mut(&playback_id) {
+                voice.status.phase = phase;
+                voice.status.detail = detail.clone();
+            }
+            log.note_kind("audio", format!("Audio {playback_id}: {phase} — {detail}"));
+            let _ = done.send(Some(result));
+        });
+        Ok(Ticket { id, done: receiver })
+    }
+
+    async fn ensure_resident_channel(&self, output: &Output) -> Result<ResidentChannel, String> {
+        let backend = output.backend.clone().ok_or("output has no audio sink")?;
+        let mut channels = self.resident_channels.lock().await;
+        if let Some(channel) = channels.get(&output.id)
+            && channel.backend == backend
+            && !channel.commands.is_closed()
+        {
+            return Ok(channel.clone());
+        }
+        let channel =
+            spawn_resident_channel(output.id.clone(), backend, self.resident_latency_ms).await?;
+        channels.insert(output.id.clone(), channel.clone());
+        Ok(channel)
     }
 
     async fn play_in_generation(
@@ -585,6 +800,190 @@ impl AudioRuntime {
     }
 }
 
+async fn spawn_resident_channel(
+    output_id: String,
+    backend: String,
+    latency_ms: u16,
+) -> Result<ResidentChannel, String> {
+    let mut child = Command::new("pw-play")
+        .args([
+            "--target",
+            &backend,
+            "--properties",
+            r#"{"node.dont-fallback":true,"node.dont-reconnect":true,"node.linger":false,"media.role":"Music"}"#,
+            "--latency",
+            &format!("{latency_ms}ms"),
+            "--rate",
+            &RESIDENT_RATE.to_string(),
+            "--channels",
+            &RESIDENT_CHANNELS.to_string(),
+            "--channel-map",
+            "stereo",
+            "--format",
+            "s16",
+            "--raw",
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| format!("could not start resident pw-play: {error}"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or("resident pw-play did not expose stdin")?;
+    let (commands, receiver) = mpsc::channel(32);
+    let channel = ResidentChannel { backend, commands };
+    tokio::spawn(run_resident_channel(output_id, child, stdin, receiver));
+    Ok(channel)
+}
+
+async fn run_resident_channel(
+    output_id: String,
+    mut child: tokio::process::Child,
+    mut stdin: tokio::process::ChildStdin,
+    mut commands: mpsc::Receiver<ResidentCommand>,
+) {
+    let samples_per_chunk =
+        (u64::from(RESIDENT_RATE) * RESIDENT_CHUNK_MS / 1000) as usize * RESIDENT_CHANNELS;
+    let mut voices: BTreeMap<String, ResidentVoice> = BTreeMap::new();
+    let mut interval = tokio::time::interval(Duration::from_millis(RESIDENT_CHUNK_MS));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let failure = loop {
+        tokio::select! {
+            biased;
+            command = commands.recv() => match command {
+                Some(ResidentCommand::Play { id, clip, volume, done }) => {
+                    voices.insert(id, ResidentVoice {
+                        samples: Arc::clone(&clip.samples),
+                        cursor: 0,
+                        volume,
+                        done,
+                    });
+                }
+                Some(ResidentCommand::Stop { id }) => {
+                    if let Some(voice) = voices.remove(&id) {
+                        let _ = voice.done.send(Err("audio stopped by operator".into()));
+                    }
+                }
+                None => break "resident audio runtime stopped".to_string(),
+            },
+            _ = interval.tick() => {
+                let (bytes, finished) = mix_resident_chunk(&mut voices, samples_per_chunk);
+                if let Err(error) = stdin.write_all(&bytes).await {
+                    break format!("resident audio output `{output_id}` failed: {error}");
+                }
+                for voice in finished {
+                    let _ = voice.done.send(Ok("resident audio playback finished".into()));
+                }
+            }
+        }
+    };
+    for (_, voice) in voices {
+        let _ = voice.done.send(Err(failure.clone()));
+    }
+    drop(stdin);
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    crate::fx_log!("{failure}");
+}
+
+fn mix_resident_chunk(
+    voices: &mut BTreeMap<String, ResidentVoice>,
+    sample_count: usize,
+) -> (Vec<u8>, Vec<ResidentVoice>) {
+    let mut mixed = vec![0_i32; sample_count];
+    let mut finished_ids = Vec::new();
+    for (id, voice) in voices.iter_mut() {
+        let remaining = voice.samples.len().saturating_sub(voice.cursor);
+        let count = remaining.min(sample_count);
+        for (output, sample) in mixed[..count]
+            .iter_mut()
+            .zip(&voice.samples[voice.cursor..voice.cursor + count])
+        {
+            *output += (f32::from(*sample) * voice.volume).round() as i32;
+        }
+        voice.cursor += count;
+        if voice.cursor == voice.samples.len() {
+            finished_ids.push(id.clone());
+        }
+    }
+    let mut bytes = Vec::with_capacity(sample_count * 2);
+    for sample in mixed {
+        bytes.extend_from_slice(
+            &(sample.clamp(i16::MIN.into(), i16::MAX.into()) as i16).to_le_bytes(),
+        );
+    }
+    let finished = finished_ids
+        .into_iter()
+        .filter_map(|id| voices.remove(&id))
+        .collect();
+    (bytes, finished)
+}
+
+fn decode_resident_wav(path: &std::path::Path) -> Result<ResidentClip, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err("expected a RIFF/WAVE file".into());
+    }
+    let mut offset = 12;
+    let mut format = None;
+    let mut pcm = None;
+    while offset + 8 <= bytes.len() {
+        let name = &bytes[offset..offset + 4];
+        let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        offset += 8;
+        if offset + size > bytes.len() {
+            return Err("WAV chunk exceeds file length".into());
+        }
+        if name == b"fmt " && size >= 16 {
+            format = Some((
+                u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap()),
+                u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap()),
+                u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()),
+                u16::from_le_bytes(bytes[offset + 14..offset + 16].try_into().unwrap()),
+            ));
+        } else if name == b"data" {
+            pcm = Some(&bytes[offset..offset + size]);
+        }
+        offset += size + (size & 1);
+    }
+    let (codec, channels, rate, bits) = format.ok_or("WAV has no fmt chunk")?;
+    if codec != 1 || bits != 16 || !(channels == 1 || channels == 2) || rate == 0 {
+        return Err(format!(
+            "expected 16-bit PCM mono/stereo; found codec={codec}, channels={channels}, rate={rate}, bits={bits}"
+        ));
+    }
+    let pcm = pcm.ok_or("WAV has no data chunk")?;
+    if pcm.len() % (usize::from(channels) * 2) != 0 {
+        return Err("WAV data is not aligned to complete frames".into());
+    }
+    let input: Vec<i16> = pcm
+        .chunks_exact(2)
+        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+        .collect();
+    let input_frames = input.len() / usize::from(channels);
+    let output_frames =
+        ((input_frames as u64 * u64::from(RESIDENT_RATE)) / u64::from(rate)) as usize;
+    let mut output = Vec::with_capacity(output_frames * RESIDENT_CHANNELS);
+    for frame in 0..output_frames {
+        let source = (frame as u64 * u64::from(rate) / u64::from(RESIDENT_RATE)) as usize;
+        let source = source.min(input_frames.saturating_sub(1));
+        let left = input[source * usize::from(channels)];
+        let right = if channels == 2 {
+            input[source * 2 + 1]
+        } else {
+            left
+        };
+        output.extend([left, right]);
+    }
+    Ok(ResidentClip {
+        samples: output.into(),
+    })
+}
+
 fn output_id(backend: &str) -> (String, Option<String>) {
     if let Some(address) = backend
         .strip_prefix("bluez_output.")
@@ -700,6 +1099,7 @@ mod tests {
                     available: true,
                     duration_ms: None,
                     file: std::env::current_exe().unwrap(),
+                    resident: None,
                 },
             )])),
             bindings: Arc::new(BTreeMap::new()),
@@ -726,6 +1126,9 @@ mod tests {
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             slots: Arc::new(Semaphore::new(1)),
             max_active: 1,
+            resident_sinks: Arc::new(BTreeSet::new()),
+            resident_channels: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            resident_latency_ms: 20,
         };
         runtime.stop_all();
         let result = runtime

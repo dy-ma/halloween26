@@ -327,6 +327,7 @@ enum RuntimeAction {
         track: String,
         sink: String,
         volume: Option<f32>,
+        resident: bool,
     },
     Screen {
         screen_id: String,
@@ -441,6 +442,7 @@ fn dc_profile_nodes(
                 track: audio.track.clone(),
                 sink: audio.output.clone(),
                 volume: None,
+                resident: false,
             },
         });
     }
@@ -871,9 +873,14 @@ fn print_show_summary(path: &std::path::Path, show: &show_config::ShowConfig) {
     println!("flows:");
     for (name, flow) in &show.flows {
         println!(
-            "  {name}: {}:{} -> {} node(s)",
+            "  {name}: {}:{}{} -> {} node(s)",
             flow.trigger.source,
             flow.trigger.cue,
+            if flow.trigger.aliases.is_empty() {
+                String::new()
+            } else {
+                format!(" (+ {})", flow.trigger.aliases.join(", "))
+            },
             flow.nodes.len()
         );
         for node in &flow.nodes {
@@ -992,6 +999,7 @@ async fn run_show(
     let workflows = workflow::WorkflowHub::new(state::StateHub::new(&show.props));
     let audio_slots = Arc::new(Semaphore::new(show.playback.max_active));
     let audio_runtime = audio_runtime::AudioRuntime::new(&show, Arc::clone(&audio_slots))?;
+    audio_runtime.start_resident_channels();
     workflows.set_audio(audio_runtime.clone());
     let mut cue_senders = BTreeMap::new();
     for (link_name, link) in &show.links {
@@ -1521,6 +1529,11 @@ fn compile_flows(
                     sink,
                     asset,
                     volume,
+                }
+                | show_config::ActionConfig::AudioTrigger {
+                    sink,
+                    asset,
+                    volume,
                 } => {
                     let show_config::SinkConfig::Audio {
                         volume: sink_volume,
@@ -1533,6 +1546,10 @@ fn compile_flows(
                         track: asset.clone(),
                         sink: sink.clone(),
                         volume: volume.or(*sink_volume),
+                        resident: matches!(
+                            &node.action,
+                            show_config::ActionConfig::AudioTrigger { .. }
+                        ),
                     }
                 }
                 show_config::ActionConfig::ScreenCommand {
@@ -1602,10 +1619,12 @@ fn compile_flows(
             role: flow.role,
             nodes,
         };
-        compiled
-            .entry((source_link, flow.trigger.cue.clone()))
-            .or_insert_with(Vec::new)
-            .push(runtime.clone());
+        for cue in std::iter::once(&flow.trigger.cue).chain(&flow.trigger.aliases) {
+            compiled
+                .entry((source_link.clone(), cue.clone()))
+                .or_insert_with(Vec::new)
+                .push(runtime.clone());
+        }
         named.insert(flow_name.clone(), runtime);
     }
     Ok(CompiledFlows {
@@ -1768,7 +1787,18 @@ fn dispatch_show_event(
         message.sequence,
         matching.len()
     );
-    for flow in matching {
+    // Direct interaction feedback is represented as a utility flow. Dispatch
+    // it before state-gated show/reset flows so a rejected choreography can
+    // never delay or suppress the horn acknowledgement.
+    let ordered = matching
+        .iter()
+        .filter(|flow| flow.role == show_config::FlowRole::Utility)
+        .chain(
+            matching
+                .iter()
+                .filter(|flow| flow.role != show_config::FlowRole::Utility),
+        );
+    for flow in ordered {
         if matches!(
             flow.role,
             show_config::FlowRole::Reset | show_config::FlowRole::Stop
@@ -1814,13 +1844,15 @@ async fn execute_node(
             track,
             sink,
             volume,
+            resident,
         } => {
             let audio = workflows.audio()?;
-            audio
-                .play(&track, &sink, volume, workflows)
-                .await?
-                .wait()
-                .await
+            let ticket = if resident {
+                audio.trigger(&track, &sink, volume, workflows).await?
+            } else {
+                audio.play(&track, &sink, volume, workflows).await?
+            };
+            ticket.wait().await
         }
         RuntimeAction::Screen {
             screen_id,
