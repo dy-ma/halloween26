@@ -450,7 +450,10 @@ impl AudioRuntime {
             );
             child
         };
-        log.note(format!("Audio {}: {} → {}", id, track.label, output.label));
+        log.note_kind(
+            "audio",
+            format!("Audio {}: {} → {}", id, track.label, output.label),
+        );
         let runtime = self.clone();
         let playback_id = id.clone();
         let log = log.clone();
@@ -487,7 +490,7 @@ impl AudioRuntime {
                 voice.status.phase = phase;
                 voice.status.detail = detail.clone();
             }
-            log.note(format!("Audio {playback_id}: {phase} — {detail}"));
+            log.note_kind("audio", format!("Audio {playback_id}: {phase} — {detail}"));
             let _ = done.send(Some(result));
         });
         Ok(Ticket { id, done: receiver })

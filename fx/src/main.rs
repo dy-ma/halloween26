@@ -988,6 +988,7 @@ async fn run_show(
 
     let (event_sender, mut events) = tokio::sync::mpsc::channel(128);
     let boards = web::BoardRegistry::default();
+    let system = web::SystemRegistry::new();
     let workflows = workflow::WorkflowHub::new(state::StateHub::new(&show.props));
     let audio_slots = Arc::new(Semaphore::new(show.playback.max_active));
     let audio_runtime = audio_runtime::AudioRuntime::new(&show, Arc::clone(&audio_slots))?;
@@ -995,9 +996,24 @@ async fn run_show(
     let mut cue_senders = BTreeMap::new();
     for (link_name, link) in &show.links {
         let incoming_and_outgoing = match link {
-            show_config::LinkConfig::SerialCue { port, baud } => Some(
-                serial_input::spawn_reconnecting_link(link_name.clone(), port.clone(), *baud, 128),
-            ),
+            show_config::LinkConfig::SerialCue { port, baud } => {
+                let (incoming, outgoing, monitor) = serial_input::spawn_reconnecting_link(
+                    link_name.clone(),
+                    port.clone(),
+                    *baud,
+                    128,
+                );
+                system.register(
+                    link_name,
+                    "serial",
+                    port.as_ref().map_or_else(
+                        || "auto-discovery".into(),
+                        |path| path.display().to_string(),
+                    ),
+                    monitor,
+                );
+                Some((incoming, outgoing))
+            }
             show_config::LinkConfig::MqttCue {
                 host,
                 port,
@@ -1006,24 +1022,27 @@ async fn run_show(
                 topic_prefix,
                 username,
                 password_env,
-            } => Some(mqtt_input::spawn_reconnecting_link(
-                link_name.clone(),
-                mqtt_input::MqttLinkConfig {
-                    host: host.clone(),
-                    port: *port,
-                    node: node.clone(),
-                    client_id: client_id.clone(),
-                    topic_prefix: topic_prefix.clone(),
-                    username: username.clone(),
-                    password_env: password_env.clone(),
-                },
-                128,
-            )),
-            show_config::LinkConfig::SimulatedCue => {
-                cue_senders.insert(
+            } => {
+                let (incoming, outgoing, monitor) = mqtt_input::spawn_reconnecting_link(
                     link_name.clone(),
-                    cue_link::spawn_simulated_link(link_name.clone(), 128),
+                    mqtt_input::MqttLinkConfig {
+                        host: host.clone(),
+                        port: *port,
+                        node: node.clone(),
+                        client_id: client_id.clone(),
+                        topic_prefix: topic_prefix.clone(),
+                        username: username.clone(),
+                        password_env: password_env.clone(),
+                    },
+                    128,
                 );
+                system.register(link_name, "mqtt", format!("{host}:{port}"), monitor);
+                Some((incoming, outgoing))
+            }
+            show_config::LinkConfig::SimulatedCue => {
+                let (sender, monitor) = cue_link::spawn_simulated_link(link_name.clone(), 128);
+                cue_senders.insert(link_name.clone(), sender);
+                system.register(link_name, "simulated", "in-process".into(), monitor);
                 None
             }
         };
@@ -1048,6 +1067,23 @@ async fn run_show(
     }
 
     let flows = compile_flows(&show, &cue_senders)?;
+    for (flow_name, flow) in &flows.by_name {
+        for node in &flow.nodes {
+            workflows.register_timing(
+                flow_name,
+                flow.role,
+                node.id
+                    .rsplit_once('/')
+                    .map_or(node.id.as_str(), |(_, node)| node),
+                &node.id,
+                node.at_ms,
+                node.after.clone(),
+                node.transition
+                    .as_ref()
+                    .map(|transition| format!("{}.{}", transition.prop, transition.transition)),
+            );
+        }
+    }
     let mut controls = compile_controls(&show, &cue_senders, &flows.by_name)?;
     let mut dc_profile_targets = BTreeMap::new();
     for (id, control) in &show.controls {
@@ -1114,6 +1150,7 @@ async fn run_show(
                     panel: panel.clone().unwrap_or_else(|| "show".into()),
                     target: None,
                     section: section.map_or("show", show_config::ControlSection::as_str),
+                    role: controls[id].role,
                 },
                 show_config::ControlConfig::Cue {
                     label,
@@ -1153,6 +1190,7 @@ async fn run_show(
                         panel: panel.clone().unwrap_or_else(|| sink.clone()),
                         target,
                         section: section.map_or("bench", show_config::ControlSection::as_str),
+                        role: controls[id].role,
                     }
                 }
             })
@@ -1248,6 +1286,7 @@ async fn run_show(
                 panel: screen_id.clone(),
                 target: None,
                 section: "bench",
+                role: show_config::FlowRole::Utility,
             });
         }
     }
@@ -1271,6 +1310,7 @@ async fn run_show(
             reload_sender: reload_available.then_some(reload_sender),
             boards: boards.clone(),
             workflows: workflows.clone(),
+            system: system.clone(),
         };
         tokio::spawn(async move {
             let result = web::serve(bind, server.static_dir, server.screen_id, hub, control).await;

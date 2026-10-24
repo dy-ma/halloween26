@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 #[cfg(test)]
 use crate::cue_link::EventDeduper;
-use crate::cue_link::{CueLinkSender, EventMessage};
+use crate::cue_link::{CueLinkSender, EventMessage, LinkMonitor};
 
 const SERIAL_BY_ID: &str = "/dev/serial/by-id";
 
@@ -28,9 +28,11 @@ pub fn spawn_reconnecting_link(
     explicit_port: Option<PathBuf>,
     baud: u32,
     capacity: usize,
-) -> (mpsc::Receiver<EventMessage>, CueLinkSender) {
+) -> (mpsc::Receiver<EventMessage>, CueLinkSender, LinkMonitor) {
     let (event_sender, event_receiver) = mpsc::channel(capacity);
     let (handle, outgoing_receiver) = CueLinkSender::channel(capacity);
+    let monitor = LinkMonitor::default();
+    let thread_monitor = monitor.clone();
     thread::Builder::new()
         .name(format!("fx-cue-{link_name}"))
         .spawn(move || {
@@ -62,6 +64,7 @@ pub fn spawn_reconnecting_link(
                     "cue link `{link_name}` connected to {} at {baud} baud",
                     port.display()
                 );
+                thread_monitor.set_connected(true);
                 retry_delay = Duration::from_millis(250);
                 'connection: loop {
                     while let Ok(outgoing) = outgoing_receiver.try_recv() {
@@ -75,6 +78,7 @@ pub fn spawn_reconnecting_link(
                         if let Err(error) =
                             connection.emit(outgoing.id, &outgoing.destination, &outgoing.event)
                         {
+                            thread_monitor.set_connected(false);
                             crate::fx_log!(
                                 "cue link `{link_name}` write failed: {error}; reconnecting"
                             );
@@ -108,6 +112,7 @@ pub fn spawn_reconnecting_link(
                             }
                         }
                         Err(error) => {
+                            thread_monitor.set_connected(false);
                             crate::fx_log!(
                                 "cue link `{link_name}` read failed: {error}; reconnecting"
                             );
@@ -119,7 +124,7 @@ pub fn spawn_reconnecting_link(
             }
         })
         .expect("could not start cue serial owner thread");
-    (event_receiver, handle)
+    (event_receiver, handle, monitor)
 }
 
 struct CueSerial {

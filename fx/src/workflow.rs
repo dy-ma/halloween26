@@ -39,10 +39,17 @@ pub enum Phase {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NodeStatus {
     pub id: String,
     pub phase: Phase,
     pub detail: String,
+    pub offset_ms: u64,
+    pub after: Vec<String>,
+    pub transition: Option<String>,
+    pub execute_at_ms: Option<u64>,
+    pub started_at_ms: Option<u64>,
+    pub finished_at_ms: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -66,7 +73,21 @@ pub struct Snapshot {
     pub state: StateSnapshot,
     pub devices: Vec<DeviceStatus>,
     pub runs: Vec<RunStatus>,
+    pub timings: Vec<TimingStatus>,
     pub log: Vec<LogEntry>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimingStatus {
+    pub node_id: String,
+    pub flow: String,
+    pub node: String,
+    pub role: FlowRole,
+    pub default_at_ms: u64,
+    pub at_ms: u64,
+    pub after: Vec<String>,
+    pub transition: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -75,6 +96,7 @@ pub struct LogEntry {
     pub id: u64,
     pub timestamp_ms: u64,
     pub level: &'static str,
+    pub kind: &'static str,
     pub message: String,
     pub run_id: Option<String>,
 }
@@ -87,12 +109,19 @@ struct Inner {
 }
 
 impl Inner {
-    fn log(&mut self, level: &'static str, message: String, run_id: Option<&str>) {
+    fn log(
+        &mut self,
+        level: &'static str,
+        kind: &'static str,
+        message: String,
+        run_id: Option<&str>,
+    ) {
         self.next_log_id += 1;
         self.log.push_back(LogEntry {
             id: self.next_log_id,
             timestamp_ms: now_ms(),
             level,
+            kind,
             message,
             run_id: run_id.map(str::to_owned),
         });
@@ -109,6 +138,7 @@ pub struct WorkflowHub {
     audio: Arc<Mutex<Option<crate::audio_runtime::AudioRuntime>>>,
     generation: Arc<AtomicU32>,
     state: StateHub,
+    timings: Arc<Mutex<BTreeMap<String, TimingStatus>>>,
 }
 
 impl Default for WorkflowHub {
@@ -137,6 +167,7 @@ impl WorkflowHub {
             audio: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU32::new(generation.max(1))),
             state,
+            timings: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 }
@@ -163,10 +194,61 @@ impl WorkflowHub {
     }
 
     pub fn note(&self, message: String) {
+        self.note_kind("system", message);
+    }
+
+    pub fn note_kind(&self, kind: &'static str, message: String) {
         self.inner
             .lock()
             .expect("workflow mutex")
-            .log("info", message, None);
+            .log("info", kind, message, None);
+    }
+
+    pub fn register_timing(
+        &self,
+        flow: &str,
+        role: FlowRole,
+        node: &str,
+        node_id: &str,
+        at_ms: u64,
+        after: Vec<String>,
+        transition: Option<String>,
+    ) {
+        self.timings.lock().expect("timing mutex").insert(
+            node_id.into(),
+            TimingStatus {
+                node_id: node_id.into(),
+                flow: flow.into(),
+                node: node.into(),
+                role,
+                default_at_ms: at_ms,
+                at_ms,
+                after,
+                transition,
+            },
+        );
+    }
+
+    pub fn set_timing(&self, node_id: &str, at_ms: u64) -> Result<(), String> {
+        if at_ms > 60_000 {
+            return Err("execution offset must be between 0 and 60000ms".into());
+        }
+        let mut timings = self.timings.lock().expect("timing mutex");
+        let timing = timings
+            .get_mut(node_id)
+            .ok_or_else(|| format!("unknown flow node `{node_id}`"))?;
+        timing.at_ms = at_ms;
+        drop(timings);
+        self.note_kind("timing", format!("Timing {node_id} set to {at_ms}ms"));
+        Ok(())
+    }
+
+    fn timing_for(&self, node_id: &str, fallback: u64) -> u64 {
+        self.timings
+            .lock()
+            .expect("timing mutex")
+            .get(node_id)
+            .map_or(fallback, |timing| timing.at_ms)
     }
 
     pub fn record(&self, message: &EventMessage) {
@@ -205,6 +287,7 @@ impl WorkflowHub {
         if changed {
             inner.log(
                 "info",
+                "device",
                 format!(
                     "{} / {}: {}{}",
                     status.link,
@@ -236,6 +319,13 @@ impl WorkflowHub {
             state: self.state.snapshot(),
             devices: inner.devices.values().cloned().collect(),
             runs: inner.runs.iter().rev().map(|r| r.status.clone()).collect(),
+            timings: self
+                .timings
+                .lock()
+                .expect("timing mutex")
+                .values()
+                .cloned()
+                .collect(),
             log: inner.log.iter().cloned().collect(),
         }
     }
@@ -270,6 +360,13 @@ impl WorkflowHub {
         {
             status.phase = phase;
             status.detail = detail.clone();
+            let timestamp = now_ms();
+            if phase == Phase::Running && status.started_at_ms.is_none() {
+                status.started_at_ms = Some(timestamp);
+            }
+            if matches!(phase, Phase::Complete | Phase::Failed | Phase::Skipped) {
+                status.finished_at_ms = Some(timestamp);
+            }
             let reason = record.status.reason.clone();
             if !record.finished
                 && record.status.nodes.iter().all(|node| {
@@ -292,6 +389,7 @@ impl WorkflowHub {
                     Phase::Skipped => "warning",
                     _ => "info",
                 },
+                "workflow",
                 format!("{reason} / {node}: {phase:?} — {detail}"),
                 Some(run),
             );
@@ -299,6 +397,24 @@ impl WorkflowHub {
         drop(inner);
         if let Some((role, success)) = finished {
             self.state.finish_flow(role, success);
+        }
+    }
+
+    fn set_execute_at(&self, run: &str, node: &str, execute_at_ms: u64) {
+        let mut inner = self.inner.lock().expect("workflow mutex");
+        if let Some(status) = inner
+            .runs
+            .iter_mut()
+            .find(|record| record.status.id == run)
+            .and_then(|record| {
+                record
+                    .status
+                    .nodes
+                    .iter_mut()
+                    .find(|status| status.id == node)
+            })
+        {
+            status.execute_at_ms = Some(execute_at_ms);
         }
     }
 
@@ -346,12 +462,21 @@ impl WorkflowHub {
                         id: n.id.clone(),
                         phase: Phase::Pending,
                         detail: "waiting for dependencies".into(),
+                        offset_ms: self.timing_for(&n.id, n.at_ms),
+                        after: n.after.clone(),
+                        transition: n.transition.as_ref().map(|transition| {
+                            format!("{}.{}", transition.prop, transition.transition)
+                        }),
+                        execute_at_ms: None,
+                        started_at_ms: None,
+                        finished_at_ms: None,
                     })
                     .collect(),
             },
         });
         inner.log(
             "info",
+            "workflow",
             format!("Started {reason} ({} actions)", nodes.len()),
             Some(&id),
         );
@@ -414,11 +539,13 @@ impl WorkflowHub {
                     let _ = state.send(Phase::Skipped);
                     return;
                 }
+                let offset_ms = hub.timing_for(&node.id, node.at_ms);
                 let target_ms = if has_dependencies {
-                    now_ms().saturating_add(node.at_ms)
+                    now_ms().saturating_add(offset_ms)
                 } else {
-                    started_at_ms.saturating_add(node.at_ms)
+                    started_at_ms.saturating_add(offset_ms)
                 };
+                hub.set_execute_at(&run, &node.id, target_ms);
                 let remote_schedule = matches!(
                     &node.action,
                     crate::RuntimeAction::Cue {
@@ -815,6 +942,43 @@ mod tests {
         assert_eq!(outgoing.expires_after_ms, 500);
         assert_eq!(outgoing.generation, hub.generation());
         assert_eq!(hub.snapshot().runs[0].nodes[0].phase, Phase::Scheduled);
+        hub.cancel_pending();
+    }
+
+    #[tokio::test]
+    async fn operator_timing_override_changes_the_next_dispatched_show_cue() {
+        let hub = WorkflowHub::default();
+        let (sender, rx) = crate::cue_link::CueLinkSender::channel(8);
+        let mut node = cue_node("integration/lift-a", &[], sender, false);
+        node.at_ms = 10_000;
+        hub.register_timing(
+            "integration",
+            FlowRole::Show,
+            "lift-a",
+            &node.id,
+            node.at_ms,
+            Vec::new(),
+            Some("lift_a.raise".into()),
+        );
+        hub.set_timing(&node.id, 650).unwrap();
+
+        let before = now_ms();
+        hub.start(
+            &[node],
+            FlowRole::Show,
+            &screens(),
+            Arc::new(Semaphore::new(1)),
+            "dashboard show",
+        )
+        .unwrap();
+
+        let outgoing = next_outgoing(&rx).await;
+        assert!(outgoing.execute_at_ms >= before + 600);
+        assert!(outgoing.execute_at_ms <= before + 1_000);
+        let snapshot = hub.snapshot();
+        assert_eq!(snapshot.runs[0].nodes[0].offset_ms, 650);
+        assert_eq!(snapshot.timings[0].default_at_ms, 10_000);
+        assert_eq!(snapshot.timings[0].at_ms, 650);
         hub.cancel_pending();
     }
 }

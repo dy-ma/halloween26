@@ -235,8 +235,9 @@ section = "bench"
 
 [controls.dc_a_forward]
 type = "cue"
-label = "DC A forward"
+label = "Lift A up"
 sink = "dc_a"
+panel = "lift_a"
 cue = "dc:jog:fwd:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -245,8 +246,9 @@ key = "w"
 
 [controls.dc_a_reverse]
 type = "cue"
-label = "DC A reverse"
+label = "Lift A down"
 sink = "dc_a"
+panel = "lift_a"
 cue = "dc:jog:rev:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -255,8 +257,9 @@ key = "s"
 
 [controls.dc_b_forward]
 type = "cue"
-label = "DC B forward"
+label = "Lift B down"
 sink = "dc_b"
+panel = "lift_b"
 cue = "dc:jog:fwd:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -265,8 +268,9 @@ key = "ArrowUp"
 
 [controls.dc_b_reverse]
 type = "cue"
-label = "DC B reverse"
+label = "Lift B up"
 sink = "dc_b"
+panel = "lift_b"
 cue = "dc:jog:rev:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -275,15 +279,17 @@ key = "ArrowDown"
 
 [controls.stepper_stroke]
 type = "cue"
-label = "Stroke piston counter-clockwise (360°)"
+label = "Smokestack stroke (360°)"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:rev:1600:60"
 key = "Space"
 
 [controls.stepper_position_cw]
 type = "cue"
-label = "Position clockwise"
+label = "Position smokestack clockwise"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:jog:fwd:30"
 release_cue = "step:stop"
 repeat_ms = 100
@@ -291,8 +297,9 @@ expires_after_ms = 500
 
 [controls.stepper_position_ccw]
 type = "cue"
-label = "Position counter-clockwise"
+label = "Position smokestack counter-clockwise"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:jog:rev:30"
 release_cue = "step:stop"
 repeat_ms = 100
@@ -300,8 +307,9 @@ expires_after_ms = 500
 
 [controls.stepper_stop]
 type = "cue"
-label = "Stop stepper"
+label = "Stop smokestack"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:stop"
 
 

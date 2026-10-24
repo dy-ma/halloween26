@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityLog, type ActivityEntry } from './ActivityLog'
+import { ActivityLog } from './ActivityLog'
 import { DisplayDevices, type DisplayDevice } from './DisplayDevices'
 import { AudioDevices } from './AudioDevices'
 import { DcDriveControl } from './DcDriveControl'
 import { DcCurveTuner } from './DcCurveTuner'
+import { RunTimeline } from './RunTimeline'
+import { StateGraph } from './StateGraph'
+import { SystemOverview } from './SystemOverview'
+import { TimingEditor } from './TimingEditor'
+import type { FlowRole, RuntimeStatus, ScreenStatus, SystemStatus } from './dashboard-types'
 import './control-panel.css'
 
 type ControlDefinition = {
@@ -20,6 +25,7 @@ type ControlDefinition = {
   panel: string
   target: string | null
   section: 'show' | 'bench'
+  role: FlowRole
 }
 
 type AudioOutputDefinition = {
@@ -41,14 +47,6 @@ type BoardStatus = {
   transport: string
   rssi: number | null
   online: boolean
-}
-
-type RuntimeStatus = {
-  log: ActivityEntry[]
-  devices: { link: string; node: string; event: string; commandId: string | null; receivedAtMs: number }[]
-  runs: { id: string; reason: string; startedAtMs: number; nodes: {
-    id: string; phase: 'pending' | 'running' | 'complete' | 'failed' | 'skipped'; detail: string
-  }[] }[]
 }
 
 type ActiveHold = {
@@ -77,14 +75,20 @@ const panelTitle = (panel: string) => panel
     : `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
   .join(' ')
 
-const preferredPanels = ['dc_a', 'dc_b', 'stepper', 'tractor-eye', 'speaker']
+const preferredPanels = ['lift_a', 'lift_b', 'smokestack', 'tractor-eye', 'speaker']
+
+const isRoleBlocked = (role: FlowRole, mode: RuntimeStatus['state']['mode']) =>
+  (role === 'show' && mode !== 'ready')
+  || (role === 'reset' && (mode === 'running' || mode === 'resetting'))
 
 export function ControlPanel() {
   const [manifest, setManifest] = useState<ControlManifest | null>(null)
   const [boards, setBoards] = useState<BoardStatus[]>([])
   const [displays, setDisplays] = useState<DisplayDevice[]>([])
   const [displayUnavailable, setDisplayUnavailable] = useState(false)
-  const [runtime, setRuntime] = useState<RuntimeStatus>({ devices: [], runs: [], log: [] })
+  const [runtime, setRuntime] = useState<RuntimeStatus>({ state: { mode: 'unmanaged', props: [] }, devices: [], runs: [], timings: [], log: [] })
+  const [system, setSystem] = useState<SystemStatus | null>(null)
+  const [screens, setScreens] = useState<ScreenStatus[]>([])
   const [status, setStatus] = useState('Connecting…')
   const [busy, setBusy] = useState<Set<string>>(() => new Set())
   const [reloading, setReloading] = useState(false)
@@ -112,22 +116,44 @@ export function ControlPanel() {
     let active = true
     const loadScreens = async () => {
       try {
-        const [screenResponse, runtimeResponse] = await Promise.all([
+        const [screenResponse, runtimeResponse, roleResponse] = await Promise.all([
           fetch('/api/displays', { cache: 'no-store' }),
           fetch('/api/status', { cache: 'no-store' }),
+          fetch('/api/screens', { cache: 'no-store' }),
         ])
-        if (!screenResponse.ok || !runtimeResponse.ok) throw new Error('Status unavailable')
-        const [value, status] = await Promise.all([
+        if (!screenResponse.ok || !runtimeResponse.ok || !roleResponse.ok) throw new Error('Status unavailable')
+        const [value, status, roles] = await Promise.all([
           screenResponse.json() as Promise<DisplayDevice[]>,
           runtimeResponse.json() as Promise<RuntimeStatus>,
+          roleResponse.json() as Promise<ScreenStatus[]>,
         ])
-        if (active) { setDisplays(value); setRuntime(status); setDisplayUnavailable(false) }
+        if (active) { setDisplays(value); setRuntime(status); setScreens(roles); setDisplayUnavailable(false) }
       } catch {
         if (active) setDisplayUnavailable(true)
       }
     }
     void loadScreens()
     const timer = window.setInterval(() => { void loadScreens() }, 1_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadSystem = async () => {
+      try {
+        const response = await fetch('/api/system', { cache: 'no-store' })
+        if (!response.ok) throw new Error(await response.text())
+        const value = await response.json() as SystemStatus
+        if (active) setSystem(value)
+      } catch {
+        if (active) setSystem(null)
+      }
+    }
+    void loadSystem()
+    const timer = window.setInterval(() => { void loadSystem() }, 5_000)
     return () => {
       active = false
       window.clearInterval(timer)
@@ -234,6 +260,10 @@ export function ControlPanel() {
 
   const invoke = useCallback(async (control: ControlDefinition) => {
     if (control.kind === 'hold') return
+    if (isRoleBlocked(control.role, runtime.state.mode)) {
+      setStatus(`${control.label}: unavailable while controller is ${runtime.state.mode}`)
+      return
+    }
     setBusy(current => new Set(current).add(control.id))
     try {
       await send(control.id, 'press', typeof control.rpm === 'number' ? {
@@ -249,7 +279,7 @@ export function ControlPanel() {
         return next
       })
     }
-  }, [send])
+  }, [runtime.state.mode, send])
 
   const releaseHold = useCallback(async (controlId: string) => {
     if (startingHolds.current.has(controlId)) {
@@ -284,6 +314,7 @@ export function ControlPanel() {
   const startHold = useCallback(async (control: ControlDefinition) => {
     if (control.kind !== 'hold' || activeHolds.current.has(control.id)
       || startingHolds.current.has(control.id)) return
+    if (isRoleBlocked(control.role, runtime.state.mode)) return
     if (control.group) {
       const activeConflicts = [...activeHolds.current.entries()]
         .filter(([, active]) => active.control.group === control.group)
@@ -316,7 +347,7 @@ export function ControlPanel() {
       startingHolds.current.delete(control.id)
       cancelledStarts.current.delete(control.id)
     }
-  }, [releaseHold, send, sendHold])
+  }, [releaseHold, runtime.state.mode, send, sendHold])
 
   useEffect(() => {
     const controlsByKey = new Map(
@@ -357,6 +388,7 @@ export function ControlPanel() {
   }, [invoke, manifest, releaseAll, releaseHold, startHold])
 
   const flows = manifest?.controls.filter(control => control.section === 'show') ?? []
+  const choreographyTimings = runtime.timings.filter(timing => timing.role === 'show' || timing.role === 'reset')
   const bench = manifest?.controls.filter(control => control.section === 'bench' && !control.id.startsWith('display/')
     && !manifest.audioOutputs.some(output => output.id === control.panel)) ?? []
   const benchPanels = [...new Set([
@@ -400,7 +432,8 @@ export function ControlPanel() {
     <button
       className={control.kind === 'hold' ? 'hold-button' : undefined}
       data-active={busy.has(control.id)}
-      disabled={control.kind !== 'hold' && busy.has(control.id)}
+      disabled={isRoleBlocked(control.role, runtime.state.mode) || (control.kind !== 'hold' && busy.has(control.id))}
+      title={isRoleBlocked(control.role, runtime.state.mode) ? `${control.label} is unavailable while the controller is ${runtime.state.mode}` : undefined}
       key={control.id}
       onClick={() => void invoke(control)}
       onKeyDown={event => {
@@ -458,18 +491,36 @@ export function ControlPanel() {
         </div>
       </header>
 
+      <SystemOverview runtime={runtime} system={system} screens={screens}
+        boardsOnline={boards.filter(board => board.online).length} boardsTotal={boards.length} />
+
+      <section aria-labelledby="show-controls" className="show-control-section">
+        <div className="section-heading-row"><div><p className="eyebrow">Operator actions</p><h2 id="show-controls">Show</h2></div><p>Controller is {runtime.state.mode.replace('-', ' ')}</p></div>
+        <div className="control-grid show-control-grid">
+          {flows.map(controlButton)}
+          {!flows.length && <p>No show controls configured.</p>}
+        </div>
+      </section>
+
+      <StateGraph props={runtime.state.props} screens={screens} />
+      <RunTimeline runs={runtime.runs} />
+      <TimingEditor timings={choreographyTimings} onUpdated={(nodeId, atMs) => setRuntime(current => ({
+        ...current,
+        timings: current.timings.map(timing => timing.nodeId === nodeId ? { ...timing, atMs } : timing),
+      }))} />
+
       <section aria-labelledby="boards-heading">
         <h2 id="boards-heading">Boards</h2>
         <div className="board-table-wrap">
           <table>
             <thead>
-              <tr><th>Status</th><th>Service</th><th>Node ID</th><th>Connection</th><th>RSSI</th><th>Assembly report</th></tr>
+              <tr><th>Status</th><th>Prop / firmware</th><th>Node ID</th><th>Connection</th><th>RSSI</th><th>Assembly report</th></tr>
             </thead>
             <tbody>
               {boards.map(board => (
                 <tr key={`${board.link}:${board.node}`}>
                   <td><span className={`board-dot ${board.online ? 'online' : ''}`} />{board.online ? 'Online' : 'Offline'}</td>
-                  <td>{board.service}</td>
+                  <td><strong>{manifest?.controls.find(control => control.target === board.node)?.panel.replaceAll('_', ' ') ?? board.service}</strong><small className="board-service">{board.service}</small></td>
                   <td><code>{board.node}</code></td>
                   <td>{board.transport} / {board.link}</td>
                   <td>{board.rssi === null ? '—' : `${board.rssi} dBm`}</td>
@@ -483,22 +534,14 @@ export function ControlPanel() {
         <p className="status-note">Online is live discovery. Assembly reports describe what the firmware observed; a delivery acknowledgment alone does not confirm motion or position.</p>
       </section>
 
+      <ActivityLog entries={runtime.log ?? []} />
+
       <DisplayDevices devices={displays} unavailable={displayUnavailable}
         onForgot={id => setDisplays(current => current.filter(device => device.id !== id))} />
 
       <AudioDevices />
 
       <DcCurveTuner motors={curveMotors} steppers={curveSteppers} stopControl={stopControl} displays={displays} displayUnavailable={displayUnavailable} />
-
-      <ActivityLog entries={runtime.log ?? []} />
-
-      <section aria-labelledby="show-controls">
-        <h2 id="show-controls">Show</h2>
-        <div className="control-grid">
-          {flows.map(controlButton)}
-          {!flows.length && <p>No show controls configured.</p>}
-        </div>
-      </section>
 
       <section aria-labelledby="bench-controls">
         <h2 id="bench-controls">Bench</h2>

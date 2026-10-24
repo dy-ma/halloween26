@@ -2,8 +2,9 @@ use std::{
     collections::BTreeMap,
     net::SocketAddr,
     path::PathBuf,
+    process::Command,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -58,6 +59,7 @@ pub struct ControlDefinition {
     pub panel: String,
     pub target: Option<String>,
     pub section: &'static str,
+    pub role: crate::show_config::FlowRole,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,6 +86,139 @@ pub struct ControlState {
     pub reload_sender: Option<mpsc::Sender<()>>,
     pub boards: BoardRegistry,
     pub workflows: crate::workflow::WorkflowHub,
+    pub system: SystemRegistry,
+}
+
+#[derive(Clone)]
+pub struct SystemRegistry {
+    started_at: Instant,
+    started_at_ms: u64,
+    hostname: String,
+    links: Arc<Mutex<Vec<LinkRecord>>>,
+}
+
+#[derive(Clone)]
+struct LinkRecord {
+    id: String,
+    transport: String,
+    endpoint: String,
+    monitor: crate::cue_link::LinkMonitor,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemStatus {
+    started_at_ms: u64,
+    uptime_ms: u64,
+    hostname: String,
+    wifi_ssid: Option<String>,
+    links: Vec<LinkStatus>,
+    battery_percent: Option<u8>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkStatus {
+    id: String,
+    transport: String,
+    endpoint: String,
+    connected: bool,
+}
+
+impl Default for SystemRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SystemRegistry {
+    pub fn new() -> Self {
+        let started_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        Self {
+            started_at: Instant::now(),
+            started_at_ms,
+            hostname: hostname(),
+            links: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn register(
+        &self,
+        id: &str,
+        transport: &str,
+        endpoint: String,
+        monitor: crate::cue_link::LinkMonitor,
+    ) {
+        self.links
+            .lock()
+            .expect("system links mutex")
+            .push(LinkRecord {
+                id: id.into(),
+                transport: transport.into(),
+                endpoint,
+                monitor,
+            });
+    }
+
+    fn snapshot(&self) -> SystemStatus {
+        SystemStatus {
+            started_at_ms: self.started_at_ms,
+            uptime_ms: self.started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            hostname: self.hostname.clone(),
+            wifi_ssid: wifi_ssid(),
+            links: self
+                .links
+                .lock()
+                .expect("system links mutex")
+                .iter()
+                .map(|link| LinkStatus {
+                    id: link.id.clone(),
+                    transport: link.transport.clone(),
+                    endpoint: link.endpoint.clone(),
+                    connected: link.monitor.is_connected(),
+                })
+                .collect(),
+            // No configured board currently reports measured battery charge.
+            // Keep this explicit so future fuel-gauge telemetry has a stable API.
+            battery_percent: None,
+        }
+    }
+}
+
+fn command_line(program: &str, arguments: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(arguments).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn hostname() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| command_line("hostname", &[]))
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn wifi_ssid() -> Option<String> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    command_line("iwgetid", &["--raw"]).or_else(|| {
+        command_line("nmcli", &["-t", "-f", "active,ssid", "dev", "wifi"]).and_then(|output| {
+            output.lines().find_map(|line| {
+                line.strip_prefix("yes:")
+                    .filter(|ssid| !ssid.is_empty())
+                    .map(str::to_string)
+            })
+        })
+    })
 }
 
 #[derive(Clone, Default)]
@@ -346,6 +481,8 @@ fn app(static_dir: PathBuf, screen_id: String, hub: ScreenHub, control: ControlS
         .route("/api/displays", get(display_list))
         .route("/api/displays/{id}", axum::routing::delete(forget_display))
         .route("/api/status", get(runtime_status))
+        .route("/api/system", get(system_status))
+        .route("/api/timing", axum::routing::post(update_timing))
         .route("/api/runtime/reload", axum::routing::post(runtime_reload))
         .route("/api/audio", get(audio_status).post(audio_action))
         .route("/api/volume/{output}", get(volume_get).post(volume_set))
@@ -490,6 +627,43 @@ async fn forget_display(
 
 async fn runtime_status(State(state): State<WebState>) -> Json<crate::workflow::Snapshot> {
     Json(state.control.workflows.snapshot())
+}
+
+async fn system_status(State(state): State<WebState>) -> Response {
+    let system = state.control.system.clone();
+    match tokio::task::spawn_blocking(move || system.snapshot()).await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "system status unavailable",
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TimingBody {
+    node_id: String,
+    at_ms: u64,
+}
+
+async fn update_timing(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Json(body): Json<TimingBody>,
+) -> Response {
+    if !same_origin_or_non_browser(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match state
+        .control
+        .workflows
+        .set_timing(&body.node_id, body.at_ms)
+    {
+        Ok(()) => Json(serde_json::json!({ "status": "updated" })).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+    }
 }
 
 async fn audio_status(State(state): State<WebState>) -> Response {
@@ -930,6 +1104,7 @@ mod tests {
                 reload_sender: None,
                 boards: BoardRegistry::default(),
                 workflows: crate::workflow::WorkflowHub::default(),
+                system: SystemRegistry::default(),
             },
         );
         let server = tokio::spawn(async move {

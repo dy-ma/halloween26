@@ -1,11 +1,36 @@
 use std::{
     collections::{HashSet, VecDeque},
-    sync::mpsc as std_mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc as std_mpsc,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use fx_audio::{FxError, Result};
+
+#[derive(Clone, Default)]
+pub struct LinkMonitor {
+    connected: Arc<AtomicBool>,
+}
+
+impl LinkMonitor {
+    pub fn connected() -> Self {
+        let monitor = Self::default();
+        monitor.set_connected(true);
+        monitor
+    }
+
+    pub fn set_connected(&self, connected: bool) {
+        self.connected.store(connected, Ordering::Release);
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventMessage {
@@ -112,7 +137,7 @@ impl EventDeduper {
     }
 }
 
-pub fn spawn_simulated_link(link_name: String, capacity: usize) -> CueLinkSender {
+pub fn spawn_simulated_link(link_name: String, capacity: usize) -> (CueLinkSender, LinkMonitor) {
     let (handle, outgoing_receiver) = CueLinkSender::channel(capacity);
     thread::Builder::new()
         .name(format!("fx-sim-{link_name}"))
@@ -134,7 +159,7 @@ pub fn spawn_simulated_link(link_name: String, capacity: usize) -> CueLinkSender
             }
         })
         .expect("could not start simulated cue link");
-    handle
+    (handle, LinkMonitor::connected())
 }
 
 #[cfg(test)]

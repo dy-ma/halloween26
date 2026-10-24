@@ -53,7 +53,19 @@ pub struct PropStatus {
     pub label: String,
     pub state: String,
     pub ready_state: String,
+    pub states: Vec<String>,
+    pub transitions: Vec<TransitionStatus>,
     pub pending: Option<PendingTransition>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionStatus {
+    pub name: String,
+    pub from: Vec<String>,
+    pub active: String,
+    pub to: String,
+    pub failure: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -125,6 +137,19 @@ impl StateHub {
                     label: prop.config.label.clone(),
                     state: prop.state.clone(),
                     ready_state: prop.config.ready.clone(),
+                    states: prop.config.states.clone(),
+                    transitions: prop
+                        .config
+                        .transitions
+                        .iter()
+                        .map(|(name, transition)| TransitionStatus {
+                            name: name.clone(),
+                            from: transition.from.clone(),
+                            active: transition.active.clone(),
+                            to: transition.to.clone(),
+                            failure: transition.failure.clone(),
+                        })
+                        .collect(),
                     pending: prop.pending.clone(),
                 })
                 .collect(),

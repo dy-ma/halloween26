@@ -32,6 +32,54 @@ type = "cue"
 link = "radio"
 target = "sim-stepper"
 
+[props.lift_a]
+label = "Lift A"
+initial = "unknown"
+ready = "low"
+states = ["unknown", "homing-down", "low", "raising", "high", "halted", "fault"]
+
+[props.lift_a.transitions.home]
+from = ["unknown", "low", "high", "halted", "fault"]
+active = "homing-down"
+to = "low"
+failure = "fault"
+
+[props.lift_a.transitions.raise]
+from = ["low"]
+active = "raising"
+to = "high"
+failure = "fault"
+
+[props.lift_b]
+label = "Lift B"
+initial = "unknown"
+ready = "low"
+states = ["unknown", "homing-down", "low", "raising", "high", "halted", "fault"]
+
+[props.lift_b.transitions.home]
+from = ["unknown", "low", "high", "halted", "fault"]
+active = "homing-down"
+to = "low"
+failure = "fault"
+
+[props.lift_b.transitions.raise]
+from = ["low"]
+active = "raising"
+to = "high"
+failure = "fault"
+
+[props.smokestack]
+label = "Smokestack"
+initial = "idle"
+ready = "idle"
+states = ["idle", "stroking", "halted", "fault"]
+
+[props.smokestack.transitions.stroke]
+from = ["idle"]
+active = "stroking"
+to = "idle"
+failure = "fault"
+
 [server]
 bind = "0.0.0.0:8080"
 static_dir = "../../tractor-eye/dist"
@@ -42,6 +90,7 @@ enabled = false
 
 [flows.integration]
 trigger = { source = "remote", cue = "show:start" }
+role = "show"
 
 [[flows.integration.nodes]]
 id = "wake-eye"
@@ -50,20 +99,38 @@ action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" 
 [[flows.integration.nodes]]
 id = "dc-a-pulse"
 at_ms = 500
+transition = "lift_a.raise"
 action = { type = "cue.emit", sink = "dc_a", cue = "dc:fwd:70:500" }
 
 [[flows.integration.nodes]]
 id = "dc-b-pulse"
 at_ms = 750
+transition = "lift_b.raise"
 action = { type = "cue.emit", sink = "dc_b", cue = "dc:rev:70:500" }
 
 [[flows.integration.nodes]]
 id = "stepper-turn"
 at_ms = 1000
+transition = "smokestack.stroke"
 action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60" }
+
+[flows.reset]
+trigger = { source = "remote", cue = "show:reset" }
+role = "reset"
+
+[[flows.reset.nodes]]
+id = "home-lift-a"
+transition = "lift_a.home"
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:rev:90:20000" }
+
+[[flows.reset.nodes]]
+id = "home-lift-b"
+transition = "lift_b.home"
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:fwd:90:20000" }
 
 [flows.stop_all]
 trigger = { source = "remote", cue = "show:stop" }
+role = "stop"
 
 [[flows.stop_all.nodes]]
 id = "stop-dc-a"
@@ -91,10 +158,17 @@ type = "flow"
 label = "STOP ALL"
 flow = "stop_all"
 
+[controls.reset_show]
+type = "flow"
+label = "Reset and home lifts"
+flow = "reset"
+panel = "show"
+
 [controls.dc_a_forward]
 type = "cue"
-label = "DC A forward"
+label = "Lift A up"
 sink = "dc_a"
+panel = "lift_a"
 cue = "dc:jog:fwd:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -103,8 +177,9 @@ key = "w"
 
 [controls.dc_a_reverse]
 type = "cue"
-label = "DC A reverse"
+label = "Lift A down"
 sink = "dc_a"
+panel = "lift_a"
 cue = "dc:jog:rev:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -113,8 +188,9 @@ key = "s"
 
 [controls.dc_b_forward]
 type = "cue"
-label = "DC B forward"
+label = "Lift B down"
 sink = "dc_b"
+panel = "lift_b"
 cue = "dc:jog:fwd:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -123,8 +199,9 @@ key = "ArrowUp"
 
 [controls.dc_b_reverse]
 type = "cue"
-label = "DC B reverse"
+label = "Lift B up"
 sink = "dc_b"
+panel = "lift_b"
 cue = "dc:jog:rev:255"
 release_cue = "dc:stop"
 repeat_ms = 100
@@ -133,15 +210,17 @@ key = "ArrowDown"
 
 [controls.stepper_stroke]
 type = "cue"
-label = "Stroke piston counter-clockwise (360°)"
+label = "Smokestack stroke (360°)"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:rev:1600:60"
 key = "Space"
 
 [controls.stepper_position_cw]
 type = "cue"
-label = "Position clockwise"
+label = "Position smokestack clockwise"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:jog:fwd:30"
 release_cue = "step:stop"
 repeat_ms = 100
@@ -149,8 +228,9 @@ expires_after_ms = 500
 
 [controls.stepper_position_ccw]
 type = "cue"
-label = "Position counter-clockwise"
+label = "Position smokestack counter-clockwise"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:jog:rev:30"
 release_cue = "step:stop"
 repeat_ms = 100
@@ -158,7 +238,8 @@ expires_after_ms = 500
 
 [controls.stepper_stop]
 type = "cue"
-label = "Stop stepper"
+label = "Stop smokestack"
 sink = "stepper"
+panel = "smokestack"
 cue = "step:stop"
 

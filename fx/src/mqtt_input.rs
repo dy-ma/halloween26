@@ -1,11 +1,7 @@
 use std::{
     collections::{HashSet, VecDeque},
     env,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc as std_mpsc,
-    },
+    sync::mpsc as std_mpsc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -13,7 +9,7 @@ use std::{
 use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use tokio::sync::mpsc;
 
-use crate::cue_link::{CueLinkSender, EventMessage, OutgoingCue};
+use crate::cue_link::{CueLinkSender, EventMessage, LinkMonitor, OutgoingCue};
 
 const WIRE_SIZE: usize = 80;
 const NAME_CAPACITY: usize = 32;
@@ -58,7 +54,7 @@ pub fn spawn_reconnecting_link(
     link_name: String,
     config: MqttLinkConfig,
     capacity: usize,
-) -> (mpsc::Receiver<EventMessage>, CueLinkSender) {
+) -> (mpsc::Receiver<EventMessage>, CueLinkSender, LinkMonitor) {
     let local_node = parse_node(&config.node).expect("validated MQTT node ID");
     let prefix = config.topic_prefix.trim_end_matches('/').to_string();
     let inbox_topic = format!("{prefix}/cue/{:012X}", local_node);
@@ -68,7 +64,7 @@ pub fn spawn_reconnecting_link(
     let (event_sender, event_receiver) = mpsc::channel(capacity);
     let (handle, outgoing_receiver) = CueLinkSender::channel(capacity);
     let (ack_sender, ack_receiver) = std_mpsc::sync_channel::<u64>(capacity);
-    let connected = Arc::new(AtomicBool::new(false));
+    let connected = LinkMonitor::default();
 
     let mut options = MqttOptions::new(&config.client_id, &config.host, config.port);
     options.set_keep_alive(Duration::from_secs(5));
@@ -86,7 +82,7 @@ pub fn spawn_reconnecting_link(
     let (client, mut connection) = Client::new(options, capacity);
 
     let reader_client = client.clone();
-    let reader_connected = Arc::clone(&connected);
+    let reader_connected = connected.clone();
     let reader_link = link_name.clone();
     let reader_prefix = prefix.clone();
     let reader_inbox = inbox_topic.clone();
@@ -99,7 +95,7 @@ pub fn spawn_reconnecting_link(
             for notification in connection.iter() {
                 match notification {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        reader_connected.store(true, Ordering::Release);
+                        reader_connected.set_connected(true);
                         if let Err(error) = reader_client
                             .try_subscribe(reader_inbox.clone(), QoS::AtLeastOnce)
                         {
@@ -204,18 +200,19 @@ pub fn spawn_reconnecting_link(
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        reader_connected.store(false, Ordering::Release);
+                        reader_connected.set_connected(false);
                         crate::fx_log!(
                             "MQTT link `{reader_link}` disconnected: {error}; reconnecting"
                         );
                     }
                 }
             }
-            reader_connected.store(false, Ordering::Release);
+            reader_connected.set_connected(false);
         })
         .expect("could not start MQTT receive thread");
 
     let writer_link = link_name;
+    let writer_connected = connected.clone();
     thread::Builder::new()
         .name(format!("fx-mqtt-tx-{writer_link}"))
         .spawn(move || {
@@ -250,7 +247,7 @@ pub fn spawn_reconnecting_link(
                         );
                         return false;
                     }
-                    if connected.load(Ordering::Acquire) && now >= cue.next_attempt_at {
+                    if writer_connected.is_connected() && now >= cue.next_attempt_at {
                         let topic = format!("{prefix}/cue/{:012X}", cue.packet.destination);
                         match client.try_publish(
                             topic,
@@ -276,7 +273,7 @@ pub fn spawn_reconnecting_link(
                     true
                 });
 
-                if connected.load(Ordering::Acquire) && now >= next_presence_at {
+                if writer_connected.is_connected() && now >= next_presence_at {
                     let hello = encode_packet(&Packet {
                         kind: KIND_HELLO,
                         source: local_node,
@@ -295,7 +292,7 @@ pub fn spawn_reconnecting_link(
                     );
                     next_presence_at = now + Duration::from_secs(1);
                 }
-                if connected.load(Ordering::Acquire) && now >= next_clock_at {
+                if writer_connected.is_connected() && now >= next_clock_at {
                     clock_sequence = clock_sequence.wrapping_add(1).max(1);
                     let clock = encode_packet(&Packet {
                         kind: KIND_CLOCK,
@@ -320,7 +317,7 @@ pub fn spawn_reconnecting_link(
         })
         .expect("could not start MQTT transmit thread");
 
-    (event_receiver, handle)
+    (event_receiver, handle, connected)
 }
 
 fn queue_outgoing(local_node: u64, outgoing: OutgoingCue, pending: &mut Vec<PendingCue>) {
