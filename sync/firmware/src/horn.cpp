@@ -41,16 +41,16 @@ uint32_t next_held_at = 0;
 uint32_t pressed_at = 0;
 bool show_requested = false;
 
-void sendHorn(const char* event) {
+bool sendHorn(const char* event) {
   if (kCoordinatorNode == 0) {
     if (Serial) Serial.println("horn not configured: set CUE_COORDINATOR_NODE");
-    return;
+    return false;
   }
   cue::Message message;
   if (!node.makeCue(kCoordinatorNode, event, message) ||
       transport.trySend(message) != cue::SendResult::QUEUED) {
     if (Serial) Serial.printf("horn failed to queue %s\n", event);
-    return;
+    return false;
   }
   if (Serial) {
     Serial.printf(
@@ -59,6 +59,7 @@ void sendHorn(const char* event) {
       static_cast<unsigned long long>(message.id)
     );
   }
+  return true;
 }
 
 void updateSwitch(uint32_t now) {
@@ -85,8 +86,7 @@ void updateSwitch(uint32_t now) {
   }
   if (stable == HORN_SWITCH_ACTIVE_LEVEL && !show_requested &&
       now - pressed_at >= kShowHoldMs) {
-    sendHorn(kHornShowEvent);
-    show_requested = true;
+    show_requested = sendHorn(kHornShowEvent);
   }
 }
 
