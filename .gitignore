@@ -45,3 +45,4 @@ __pycache__/
 .env.*
 !.env.example
 /sync/firmware/include/wifi_secrets.h
+/sync/shows/presets/

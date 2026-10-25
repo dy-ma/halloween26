@@ -1104,6 +1104,13 @@ async fn run_show(
             );
         }
     }
+    let show_presets = web::ShowPresetStore::new(
+        path.parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("presets"),
+        base_show_preset(&flows),
+        workflows.clone(),
+    );
     let mut controls = compile_controls(&show, &cue_senders, &flows.by_name)?;
     let mut dc_profile_targets = BTreeMap::new();
     for (id, control) in &show.controls {
@@ -1331,6 +1338,7 @@ async fn run_show(
             boards: boards.clone(),
             workflows: workflows.clone(),
             system: system.clone(),
+            presets: show_presets,
         };
         tokio::spawn(async move {
             let result = web::serve(bind, server.static_dir, server.screen_id, hub, control).await;
@@ -1523,6 +1531,33 @@ async fn run_show(
                 return Ok(());
             }
         }
+    }
+}
+
+fn base_show_preset(flows: &CompiledFlows) -> web::ShowPreset {
+    let flow = flows
+        .by_name
+        .values()
+        .find(|flow| flow.role == show_config::FlowRole::Show);
+    let nodes = flow
+        .map(|flow| {
+            flow.nodes
+                .iter()
+                .map(|node| web::ShowPresetNode {
+                    node_id: node.id.clone(),
+                    at_ms: node.at_ms,
+                    cue: match &node.action {
+                        RuntimeAction::Cue { cue, .. } => Some(cue.clone()),
+                        _ => None,
+                    },
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    web::ShowPreset {
+        version: 1,
+        name: "default".into(),
+        nodes,
     }
 }
 
@@ -1951,6 +1986,7 @@ async fn execute_node(
             wait_for,
             timeout_ms,
         } => {
+            let cue = workflows.cue_for(&node.id, &cue);
             // Subscribe before dispatch: a fast assembly can report immediately.
             let receiver = workflows.subscribe();
             let scheduled_for = execute_at_ms.unwrap_or(0);

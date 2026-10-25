@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityLog } from './ActivityLog'
 import { DisplayDevices, type DisplayDevice } from './DisplayDevices'
 import { AudioDevices } from './AudioDevices'
 import { DcDriveControl } from './DcDriveControl'
 import { DcCurveTuner } from './DcCurveTuner'
+import { DashboardDock } from './DashboardDock'
 import { RunTimeline } from './RunTimeline'
 import { StateGraph } from './StateGraph'
-import { SystemOverview } from './SystemOverview'
-import { TimingEditor } from './TimingEditor'
 import type { FlowRole, RuntimeStatus, ScreenStatus, SystemStatus } from './dashboard-types'
 import './control-panel.css'
 
@@ -407,8 +405,6 @@ export function ControlPanel() {
     }
   }, [invoke, manifest, releaseAll, releaseHold, startHold])
 
-  const flows = manifest?.controls.filter(control => control.section === 'show') ?? []
-  const choreographyTimings = runtime.timings.filter(timing => timing.role === 'show' || timing.role === 'reset')
   const bench = manifest?.controls.filter(control => control.section === 'bench' && !control.id.startsWith('display/')
     && !manifest.audioOutputs.some(output => output.id === control.panel)) ?? []
   const benchPanels = [...new Set([
@@ -428,6 +424,8 @@ export function ControlPanel() {
       label: panelTitle(control.panel),
     }])).values()]
   const stopControl = manifest?.controls.find(control => control.id === 'stop_all')?.id ?? null
+  const showControl = manifest?.controls.find(control => control.role === 'show')?.id ?? null
+  const resetControl = manifest?.controls.find(control => control.role === 'reset')?.id ?? null
   const curveSteppers = bench.filter(control => typeof control.rpm === 'number' && typeof control.strokeSteps === 'number')
     .map(control => ({ id: control.id, label: control.label, rpm: control.rpm!, steps: control.strokeSteps!, profile: control.strokeProfile ?? null }))
 
@@ -499,69 +497,42 @@ export function ControlPanel() {
 
   return (
     <main className="control-shell">
-      <header>
+      <header className="studio-header">
         <div>
-          <h1>FX Control</h1>
-          <p>{manifest?.show ?? 'Loading show…'}</p>
+          <h1>FX Studio</h1>
+          <p>{manifest?.show ?? 'Loading show…'} · edit, save, and run the real choreography</p>
         </div>
       </header>
 
-      <SystemOverview runtime={runtime} system={system} screens={screens}
-        boardsOnline={boards.filter(board => board.online).length} boardsTotal={boards.length}
-        restartFxAvailable={Boolean(manifest?.reloadAvailable)} restartingFx={reloading}
-        restartingBroker={restartingBroker} actionStatus={status}
-        onRestartFx={() => void reloadShow()} onRestartBroker={() => void restartBroker()} />
+      <DcCurveTuner motors={curveMotors} steppers={curveSteppers} stopControl={stopControl}
+        showControl={showControl} resetControl={resetControl} displays={displays} runtime={runtime} screens={screens} />
 
-      <section aria-labelledby="show-controls" className="show-control-section">
-        <div className="section-heading-row"><div><p className="eyebrow">Operator actions</p><h2 id="show-controls">Show</h2></div></div>
-        <div className="control-grid show-control-grid">
-          {flows.map(controlButton)}
-          {!flows.length && <p>No show controls configured.</p>}
-        </div>
-      </section>
+      <details className="dashboard-drawer live-drawer" open>
+        <summary>Live state machines and current run</summary>
+        <StateGraph props={runtime.state.props} screens={screens} />
+        <RunTimeline runs={runtime.runs} />
+      </details>
 
-      <StateGraph props={runtime.state.props} screens={screens} />
-      <RunTimeline runs={runtime.runs} />
-      <TimingEditor timings={choreographyTimings} onUpdated={(nodeId, atMs) => setRuntime(current => ({
-        ...current,
-        timings: current.timings.map(timing => timing.nodeId === nodeId ? { ...timing, atMs } : timing),
-      }))} />
+      <details className="dashboard-drawer">
+        <summary>Boards, audio, and displays</summary>
+        <section aria-labelledby="boards-heading">
+          <h2 id="boards-heading">Boards</h2>
+          <div className="board-table-wrap"><table><thead><tr><th>Status</th><th>Prop / firmware</th><th>Node ID</th><th>Connection</th><th>RSSI</th><th>Assembly report</th></tr></thead>
+            <tbody>{boards.map(board => <tr key={`${board.link}:${board.node}`}>
+              <td><span className={`board-dot ${board.online ? 'online' : ''}`} />{board.online ? 'Online' : 'Offline'}</td>
+              <td><strong>{manifest?.controls.find(control => control.target === board.node)?.panel.replaceAll('_', ' ') ?? board.service}</strong><small className="board-service">{board.service}</small></td>
+              <td><code>{board.node}</code></td><td>{board.transport} / {board.link}</td><td>{board.rssi === null ? '—' : `${board.rssi} dBm`}</td>
+              <td>{runtime.devices.find(device => device.link === board.link && device.node === board.node)?.event ?? '—'}</td>
+            </tr>)}{!boards.length && <tr><td colSpan={6}>No boards discovered.</td></tr>}</tbody></table></div>
+        </section>
+        <AudioDevices />
+        <DisplayDevices devices={displays} unavailable={displayUnavailable}
+          onForgot={id => setDisplays(current => current.filter(device => device.id !== id))} />
+      </details>
 
-      <section aria-labelledby="boards-heading">
-        <h2 id="boards-heading">Boards</h2>
-        <div className="board-table-wrap">
-          <table>
-            <thead>
-              <tr><th>Status</th><th>Prop / firmware</th><th>Node ID</th><th>Connection</th><th>RSSI</th><th>Assembly report</th></tr>
-            </thead>
-            <tbody>
-              {boards.map(board => (
-                <tr key={`${board.link}:${board.node}`}>
-                  <td><span className={`board-dot ${board.online ? 'online' : ''}`} />{board.online ? 'Online' : 'Offline'}</td>
-                  <td><strong>{manifest?.controls.find(control => control.target === board.node)?.panel.replaceAll('_', ' ') ?? board.service}</strong><small className="board-service">{board.service}</small></td>
-                  <td><code>{board.node}</code></td>
-                  <td>{board.transport} / {board.link}</td>
-                  <td>{board.rssi === null ? '—' : `${board.rssi} dBm`}</td>
-                  <td>{runtime.devices.find(device => device.link === board.link && device.node === board.node)?.event ?? '—'}</td>
-                </tr>
-              ))}
-              {!boards.length && <tr><td colSpan={6}>No boards discovered.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <ActivityLog entries={runtime.log ?? []} />
-
-      <DisplayDevices devices={displays} unavailable={displayUnavailable}
-        onForgot={id => setDisplays(current => current.filter(device => device.id !== id))} />
-
-      <AudioDevices />
-
-      <DcCurveTuner motors={curveMotors} steppers={curveSteppers} stopControl={stopControl} displays={displays} displayUnavailable={displayUnavailable} />
-
-      <section aria-labelledby="bench-controls">
-        <h2 id="bench-controls">Bench</h2>
+      <details className="dashboard-drawer">
+        <summary>Bench controls</summary>
+        <section aria-labelledby="bench-controls"><h2 id="bench-controls">Manual controls</h2>
         <div className="bench-grid">
           {benchPanels.map(panel => {
             const controls = bench.filter(control => control.panel === panel)
@@ -606,8 +577,14 @@ export function ControlPanel() {
           })}
           {!benchPanels.length && <p>No bench controls configured.</p>}
         </div>
-      </section>
+        </section>
+      </details>
 
+      <DashboardDock runtime={runtime} system={system} screens={screens}
+        boardsOnline={boards.filter(board => board.online).length} boardsTotal={boards.length}
+        restartFxAvailable={Boolean(manifest?.reloadAvailable)} restartingFx={reloading}
+        restartingBroker={restartingBroker} status={status}
+        onRestartFx={() => void reloadShow()} onRestartBroker={() => void restartBroker()} />
     </main>
   )
 }

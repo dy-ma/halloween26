@@ -139,6 +139,7 @@ pub struct WorkflowHub {
     generation: Arc<AtomicU32>,
     state: StateHub,
     timings: Arc<Mutex<BTreeMap<String, TimingStatus>>>,
+    cue_overrides: Arc<Mutex<BTreeMap<String, String>>>,
 }
 
 impl Default for WorkflowHub {
@@ -168,6 +169,7 @@ impl WorkflowHub {
             generation: Arc::new(AtomicU32::new(generation.max(1))),
             state,
             timings: Arc::new(Mutex::new(BTreeMap::new())),
+            cue_overrides: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 }
@@ -241,6 +243,34 @@ impl WorkflowHub {
         drop(timings);
         self.note_kind("timing", format!("Timing {node_id} set to {at_ms}ms"));
         Ok(())
+    }
+
+    pub fn set_cue_override(&self, node_id: &str, cue: String) -> Result<(), String> {
+        if cue.is_empty() || cue.len() > 256 {
+            return Err("cue must be between 1 and 256 characters".into());
+        }
+        if !self
+            .timings
+            .lock()
+            .expect("timing mutex")
+            .contains_key(node_id)
+        {
+            return Err(format!("unknown flow node `{node_id}`"));
+        }
+        self.cue_overrides
+            .lock()
+            .expect("cue override mutex")
+            .insert(node_id.into(), cue);
+        Ok(())
+    }
+
+    pub fn cue_for(&self, node_id: &str, fallback: &str) -> String {
+        self.cue_overrides
+            .lock()
+            .expect("cue override mutex")
+            .get(node_id)
+            .cloned()
+            .unwrap_or_else(|| fallback.into())
     }
 
     fn timing_for(&self, node_id: &str, fallback: u64) -> u64 {

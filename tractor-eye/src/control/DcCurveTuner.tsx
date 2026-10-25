@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DisplayDevice } from './DisplayDevices'
 import { wakeMilestones, wakeTiming } from '../sources/wake-timing'
-import { buildDcPlayback, dcPlaybackDuration, type DcPlaybackSettings } from './dc-playback'
 import { stepperTiming, stepperSpeedAt, type StepperStroke } from './stepper-timing'
+import type { RuntimeStatus, ScreenStatus } from './dashboard-types'
 
 export type DcCurveMotor = {
   id: string
@@ -27,9 +27,31 @@ type AudioStatus = {
   outputs: Output[]
 }
 
-type Draft = DcPlaybackSettings & {
+type Draft = {
   motor: string
+  direction: 'forward' | 'reverse'
+  peakPwmPercent: number
+  minimumPwmPercent: number
+  rampMs: number
+  holdMs: number
+  fadeMs: number
+  motorDelayMs: number
+  track: string
+  output: string
+  eyeDevice: string
+  wakeDelayMs: number
+  playAudio: boolean
+  playMotor: boolean
+  playEye: boolean
+  playStepper: boolean
+  stepperControl: string
+  stepperRpm: number
+  stepperDelayMs: number
 }
+
+type ShowPresetNode = { nodeId: string; atMs: number; cue: string | null }
+type ShowPreset = { version: 1; name: string; nodes: ShowPresetNode[] }
+type ShowPresetLibrary = { active: string; presets: ShowPreset[] }
 
 const storageKey = 'fx.dc-curve-tuner.v1'
 const defaultDraft: Draft = {
@@ -167,18 +189,24 @@ function CurveGraph({ draft, trackDurationMs, playheadMs, stepper }: {
   </figure>
 }
 
-export function DcCurveTuner({ motors, steppers, stopControl, displays, displayUnavailable }: {
+export function DcCurveTuner({ motors, steppers, stopControl, showControl, resetControl, displays, runtime, screens }: {
   motors: DcCurveMotor[]
   steppers: StepperStroke[]
   stopControl: string | null
+  showControl: string | null
+  resetControl: string | null
   displays: DisplayDevice[]
-  displayUnavailable: boolean
+  runtime: RuntimeStatus
+  screens: ScreenStatus[]
 }) {
   const [draft, setDraft] = useState<Draft>(loadDraft)
   const [audio, setAudio] = useState<AudioStatus | null>(null)
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
+  const [library, setLibrary] = useState<ShowPresetLibrary | null>(null)
+  const [presetName, setPresetName] = useState('default')
   const [playheadMs, setPlayheadMs] = useState<number | null>(null)
+  const firstDisplayId = displays[0]?.id
   const isPreviewing = playheadMs !== null
   const runStartedAt = useRef<number | null>(null)
   const runDurationMs = useRef(0)
@@ -193,13 +221,6 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
   const selectedStepper = steppers.find(item => item.id === stepperControl)
   const strokeTiming = selectedStepper ? stepperTiming(selectedStepper.steps, draft.stepperRpm, selectedStepper.profile) : null
   const motorDuration = draft.rampMs + draft.holdMs + draft.fadeMs
-  const selectedEye = displays.find(device => device.id === draft.eyeDevice)
-  const eyeError = !draft.eyeDevice ? 'Choose an eye display.'
-    : !Number.isInteger(draft.wakeDelayMs) || draft.wakeDelayMs < 0 || draft.wakeDelayMs > 10_000
-      ? 'Eye wake delay must be 0–10,000 ms.'
-      : displayUnavailable || !selectedEye?.connections.length
-        ? 'Selected eye display is offline. Reconnect it or uncheck Eye.'
-        : ''
   const error = draft.peakPwmPercent < 1 || draft.peakPwmPercent > 100
     ? 'Peak PWM must be 1–100%.'
     : draft.minimumPwmPercent < 0 || draft.minimumPwmPercent > draft.peakPwmPercent
@@ -216,12 +237,43 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
     : !strokeTiming ? 'Stepper speed must be 10–120 RPM.'
       : !Number.isInteger(draft.stepperDelayMs) || draft.stepperDelayMs < 0 || draft.stepperDelayMs > 10_000
         ? 'Stepper delay must be 0–10,000 ms.' : ''
-  const playbackError = !draft.playAudio && !draft.playMotor && !draft.playEye && !draft.playStepper
-    ? 'Select at least one component.'
-    : draft.playMotor && error ? error
-      : draft.playAudio && (!track || !output) ? 'Choose an available audio track and output.'
-        : draft.playEye && eyeError ? eyeError
-          : draft.playStepper && stepperError ? stepperError : ''
+  const playbackError = error || (steppers.length ? stepperError : '')
+
+  const applyPreset = useCallback((preset: ShowPreset) => {
+    const motorNode = preset.nodes.find(node => node.cue?.startsWith('dc:c:'))
+    const stepperNode = preset.nodes.find(node => node.cue?.startsWith('step:'))
+    const eyeNode = preset.nodes.find(node => node.nodeId.endsWith('/wake-eye'))
+    const motorParts = motorNode?.cue?.split(':') ?? []
+    const stepperParts = stepperNode?.cue?.split(':') ?? []
+    setDraft(current => ({
+      ...current,
+      eyeDevice: current.eyeDevice || firstDisplayId || 'tractor-eye',
+      playAudio: preset.nodes.some(node => node.nodeId.endsWith('/tractor-audio')),
+      playMotor: Boolean(motorNode),
+      playEye: Boolean(eyeNode),
+      playStepper: Boolean(stepperNode),
+      motorDelayMs: motorNode?.atMs ?? current.motorDelayMs,
+      wakeDelayMs: eyeNode?.atMs ?? current.wakeDelayMs,
+      stepperDelayMs: stepperNode?.atMs ?? current.stepperDelayMs,
+      direction: motorParts[2] === 'r' ? 'reverse' : 'forward',
+      peakPwmPercent: motorParts[3] ? Math.round(Number(motorParts[3]) * 100 / 255) : current.peakPwmPercent,
+      minimumPwmPercent: motorParts[4] ? Math.round(Number(motorParts[4]) * 100 / 255) : current.minimumPwmPercent,
+      rampMs: motorParts[5] ? Number(motorParts[5]) : current.rampMs,
+      holdMs: motorParts[6] ? Number(motorParts[6]) : current.holdMs,
+      fadeMs: motorParts[7] ? Number(motorParts[7]) : current.fadeMs,
+      stepperRpm: stepperParts[3] ? Number(stepperParts[3]) : current.stepperRpm,
+    }))
+    setPresetName(preset.name)
+  }, [firstDisplayId])
+
+  const loadLibrary = useCallback(async () => {
+    const response = await fetch('/api/show-presets', { cache: 'no-store' })
+    if (!response.ok) throw new Error(await response.text())
+    const value = await response.json() as ShowPresetLibrary
+    setLibrary(value)
+    const active = value.presets.find(preset => preset.name === value.active)
+    if (active) applyPreset(active)
+  }, [applyPreset])
 
   useEffect(() => {
     try {
@@ -230,6 +282,12 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
       // Private browsing or a locked-down kiosk may deny storage; tuning still works.
     }
   }, [draft, motor, output, track, stepperControl])
+
+  useEffect(() => {
+    // Preset state arrives asynchronously from the controller.
+    // eslint-disable-next-line react/set-state-in-effect
+    void loadLibrary().catch(loadError => setStatus(`Show library unavailable: ${String(loadError)}`))
+  }, [loadLibrary])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -267,30 +325,66 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
     setDraft(current => ({ ...current, [field]: Number(value) }))
   }
 
+  const currentPreset = (): ShowPreset => {
+    const basis = library?.presets.find(preset => preset.name === library.active)
+      ?? library?.presets[0]
+    const nodes = (basis?.nodes ?? []).map(node => {
+      if (node.cue?.startsWith('dc:c:')) return { ...node, atMs: draft.motorDelayMs, cue }
+      if (node.cue?.startsWith('step:')) {
+        const parts = node.cue.split(':')
+        return { ...node, atMs: draft.stepperDelayMs, cue: `${parts.slice(0, 3).join(':')}:${draft.stepperRpm}` }
+      }
+      if (node.nodeId.endsWith('/wake-eye')) return { ...node, atMs: draft.wakeDelayMs }
+      return node
+    })
+    return { version: 1, name: presetName.trim(), nodes }
+  }
+
+  const save = async () => {
+    if (playbackError) throw new Error(playbackError)
+    const response = await fetch('/api/show-presets', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(currentPreset()),
+    })
+    if (!response.ok) throw new Error(await response.text())
+    const value = await response.json() as ShowPresetLibrary
+    setLibrary(value)
+    setStatus(`Saved and activated ${presetName}.`)
+  }
+
   const run = async (startedAt: number) => {
-    if (!motor || playbackError) return
+    if (!showControl || playbackError) return
     setBusy(true)
     try {
+      await save()
       const response = await fetch('/api/control', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          control: motor,
-          phase: 'press',
-          dcProfile: buildDcPlayback({ ...draft, track, output, stepperControl }),
-        }),
+        body: JSON.stringify({ control: showControl, phase: 'press' }),
       })
       if (!response.ok) throw new Error(await response.text())
       runStartedAt.current = startedAt
-      runDurationMs.current = dcPlaybackDuration(draft, selectedTrack?.durationMs ?? 0,
-        wakeTiming.tipDelayMs + wakeTiming.tipDurationMs, strokeTiming?.durationMs ?? 0)
+      runDurationMs.current = Math.max(draft.motorDelayMs + motorDuration,
+        draft.wakeDelayMs + wakeTiming.tipDelayMs + wakeTiming.tipDurationMs,
+        draft.stepperDelayMs + (strokeTiming?.durationMs ?? 0), selectedTrack?.durationMs ?? 0)
       setPlayheadMs(0)
-      setStatus(`Playing: ${[draft.playAudio && 'audio', draft.playMotor && 'DC motor', draft.playStepper && 'stepper', draft.playEye && 'eye'].filter(Boolean).join(' + ')}.`)
+      setStatus(`Running ${presetName} through the show state machine.`)
     } catch (runError) {
-      setStatus(`Profile failed: ${String(runError)}`)
+      setStatus(`Show failed: ${String(runError)}`)
     } finally {
       setBusy(false)
     }
+  }
+
+  const invoke = async (control: string | null, success: string) => {
+    if (!control) return
+    setBusy(true)
+    try {
+      const response = await fetch('/api/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ control, phase: 'press' }) })
+      if (!response.ok) throw new Error(await response.text())
+      setStatus(success)
+    } catch (actionError) {
+      setStatus(String(actionError))
+    } finally { setBusy(false) }
   }
 
   const stop = async () => {
@@ -315,12 +409,28 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
 
   if (!motors.length) return null
 
-  return <section aria-labelledby="dc-curve-heading">
+  const eye = screens.find(screen => screen.id === 'tractor-eye') ?? screens[0]
+
+  return <section aria-labelledby="dc-curve-heading" className="show-studio">
     <div className="dc-curve-heading">
-      <h2 id="dc-curve-heading">Motion timing tuner</h2>
+      <div><p className="eyebrow">Authoritative choreography</p><h2 id="dc-curve-heading">Studio</h2></div>
       {status && <output className="runtime-status" aria-live="polite">{status}</output>}
     </div>
-    <div className="dc-curve-layout">
+    <div className="studio-layout">
+      <aside className="show-library" aria-label="Saved shows">
+        <h3>Shows</h3>
+        <div className="show-library-list">{library?.presets.map(preset => <button type="button" key={preset.name}
+          className={library.active === preset.name ? 'active' : ''}
+          onClick={() => {
+            void fetch(`/api/show-presets/${encodeURIComponent(preset.name)}/activate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+              .then(async response => { if (!response.ok) throw new Error(await response.text()); return response.json() as Promise<ShowPresetLibrary> })
+              .then(value => { setLibrary(value); applyPreset(preset); setStatus(`Activated ${preset.name}.`) })
+              .catch(activateError => setStatus(String(activateError)))
+          }}>{preset.name}<small>{library.active === preset.name ? 'active' : 'saved'}</small></button>)}</div>
+        <label>Name<input value={presetName} maxLength={64} onChange={event => setPresetName(event.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} /></label>
+        <button type="button" className="save-show" disabled={busy || Boolean(playbackError) || !presetName} onClick={() => void save().catch(saveError => setStatus(String(saveError)))}>Save</button>
+      </aside>
+      <div className="studio-editor">
       <div className="dc-curve-controls">
         <label>DC motor<select value={motor} onChange={event => setDraft(current => ({ ...current, motor: event.target.value }))}>
           {motors.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -353,28 +463,10 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
             value={draft.stepperRpm} onChange={event => numberChange('stepperRpm', event.target.value)} />
           <p className="dc-curve-wide eye-timing-note">{selectedStepper?.steps.toLocaleString()} microsteps · configured direction and distance. Speed changes keep the firmware’s existing ramps.</p>
         </>}
-        <label className="dc-curve-wide">Audio track<select value={track} onChange={event => setDraft(current => ({ ...current, track: event.target.value }))}>
-          {!tracks.length && <option value="">No available tracks</option>}
-          {tracks.map(item => <option key={item.id} value={item.id}>{item.label}{item.durationMs === null ? '' : ` · ${(item.durationMs / 1000).toFixed(2)}s`}</option>)}
-        </select></label>
-        <label className="dc-curve-wide">Audio output<select value={output} onChange={event => setDraft(current => ({ ...current, output: event.target.value }))}>
-          {!outputs.length && <option value="">No ready outputs</option>}
-          {outputs.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select></label>
-        <label className="dc-curve-wide">Eye display<select value={draft.eyeDevice}
-          onChange={event => setDraft(current => ({ ...current, eyeDevice: event.target.value }))}>
-          <option value="">Select display…</option>
-          {draft.eyeDevice && !selectedEye && <option value={draft.eyeDevice}>Saved display (unavailable)</option>}
-          {displays.map(device => <option key={device.id} value={device.id}>
-            {device.name}{device.connections.length ? '' : ' · offline'}
-          </option>)}
-        </select></label>
-        {draft.eyeDevice && <>
-          <label className="dc-curve-wide">Eye wake delay<input type="number" min={0} max={10000} step={50}
+        <label className="dc-curve-wide">Eye wake delay<input type="number" min={0} max={10000} step={50}
             value={draft.wakeDelayMs} onChange={event => numberChange('wakeDelayMs', event.target.value)} /><span>ms from Play</span></label>
           <input className="dc-curve-wide" type="range" aria-label="Eye wake delay" min={0} max={10000} step={50}
             value={draft.wakeDelayMs} onChange={event => numberChange('wakeDelayMs', event.target.value)} />
-        </>}
       </div>
       <div>
         <CurveGraph draft={{ ...draft, motor, track, output, stepperControl }} stepper={selectedStepper} trackDurationMs={selectedTrack?.durationMs ?? 0} playheadMs={playheadMs} />
@@ -382,18 +474,20 @@ export function DcCurveTuner({ motors, steppers, stopControl, displays, displayU
           <span>DC motor {(motorDuration / 1000).toFixed(2)}s</span>
           <code>{cue}</code>
         </div>
-        <fieldset className="dc-play-components">
-          <legend>Apply</legend>
-          {([['playAudio', 'Audio'], ['playMotor', 'DC motor'], ['playStepper', 'Stepper'], ['playEye', 'Eye']] as const).map(([field, label]) =>
-            <label key={field}><input type="checkbox" checked={draft[field]}
-              onChange={event => setDraft(current => ({ ...current, [field]: event.target.checked }))} />{label}</label>)}
-        </fieldset>
         {playbackError && <p className="dc-curve-error" role="alert">{playbackError}</p>}
         <div className="dc-curve-actions">
-          <button type="button" disabled={busy || Boolean(playbackError)} onClick={() => void run(Date.now())}>Play</button>
+          <button type="button" disabled={busy || Boolean(playbackError) || runtime.state.mode !== 'ready'} onClick={() => void run(Date.now())}>Play show</button>
+          <button type="button" disabled={busy || !resetControl || ['running', 'resetting'].includes(runtime.state.mode)} onClick={() => void invoke(resetControl, 'Reset started.')}>Reset</button>
           <button type="button" className="stop-button" disabled={!stopControl} onClick={() => void stop()}>Stop all</button>
         </div>
       </div>
+      </div>
+      <aside className="studio-live" aria-label="Live state">
+        <div><span>Controller</span><strong className={`mode-badge mode-badge--${runtime.state.mode}`}>{runtime.state.mode.replace('-', ' ')}</strong></div>
+        {runtime.state.props.map(prop => <div key={prop.id}><span>{prop.label}</span><strong>{prop.state}</strong></div>)}
+        <div><span>Eye</span><strong>{eye?.connected ? eye.state.mode : 'offline'}</strong></div>
+        <div><span>Active preset</span><strong>{library?.active ?? 'loading'}</strong></div>
+      </aside>
     </div>
   </section>
 }

@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fs,
     net::SocketAddr,
     path::PathBuf,
     process::Command,
@@ -87,6 +88,240 @@ pub struct ControlState {
     pub boards: BoardRegistry,
     pub workflows: crate::workflow::WorkflowHub,
     pub system: SystemRegistry,
+    pub presets: ShowPresetStore,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShowPresetNode {
+    pub node_id: String,
+    pub at_ms: u64,
+    pub cue: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShowPreset {
+    pub version: u8,
+    pub name: String,
+    pub nodes: Vec<ShowPresetNode>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowPresetLibrary {
+    active: String,
+    presets: Vec<ShowPreset>,
+}
+
+#[derive(Clone)]
+pub struct ShowPresetStore {
+    directory: PathBuf,
+    active: Arc<Mutex<String>>,
+    presets: Arc<Mutex<BTreeMap<String, ShowPreset>>>,
+    allowed_nodes: Arc<BTreeMap<String, Option<String>>>,
+    workflows: crate::workflow::WorkflowHub,
+}
+
+impl ShowPresetStore {
+    pub fn new(
+        directory: PathBuf,
+        base: ShowPreset,
+        workflows: crate::workflow::WorkflowHub,
+    ) -> Self {
+        let allowed_nodes = Arc::new(
+            base.nodes
+                .iter()
+                .map(|node| (node.node_id.clone(), node.cue.clone()))
+                .collect(),
+        );
+        let mut presets = BTreeMap::from([(base.name.clone(), base.clone())]);
+        if let Ok(entries) = fs::read_dir(&directory) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Ok(bytes) = fs::read(entry.path())
+                    && let Ok(preset) = serde_json::from_slice::<ShowPreset>(&bytes)
+                    && validate_preset(&preset).is_ok()
+                {
+                    presets.insert(preset.name.clone(), preset);
+                }
+            }
+        }
+        let persisted_active = fs::read_to_string(directory.join(".active"))
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|name| presets.contains_key(name));
+        let active = persisted_active
+            .clone()
+            .unwrap_or_else(|| base.name.clone());
+        let store = Self {
+            directory,
+            active: Arc::new(Mutex::new(active.clone())),
+            presets: Arc::new(Mutex::new(presets)),
+            allowed_nodes,
+            workflows,
+        };
+        if persisted_active.is_some()
+            && let Some(preset) = store
+                .presets
+                .lock()
+                .expect("preset mutex")
+                .get(&active)
+                .cloned()
+        {
+            let _ = store.apply(&preset);
+        }
+        store
+    }
+
+    fn snapshot(&self) -> ShowPresetLibrary {
+        ShowPresetLibrary {
+            active: self.active.lock().expect("active preset mutex").clone(),
+            presets: self
+                .presets
+                .lock()
+                .expect("preset mutex")
+                .values()
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn apply(&self, preset: &ShowPreset) -> Result<(), String> {
+        validate_preset(preset)?;
+        for node in &preset.nodes {
+            let configured_cue = self
+                .allowed_nodes
+                .get(&node.node_id)
+                .ok_or_else(|| format!("node `{}` is not editable in this show", node.node_id))?;
+            validate_cue_override(configured_cue.as_deref(), node.cue.as_deref())?;
+            self.workflows.set_timing(&node.node_id, node.at_ms)?;
+            if let Some(cue) = &node.cue {
+                self.workflows
+                    .set_cue_override(&node.node_id, cue.clone())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn save_and_activate(&self, preset: ShowPreset) -> Result<(), String> {
+        self.apply(&preset)?;
+        fs::create_dir_all(&self.directory).map_err(|error| error.to_string())?;
+        let file_name = preset_file_name(&preset.name)?;
+        let destination = self.directory.join(file_name);
+        let temporary = self.directory.join(format!(".{}.tmp", preset.name));
+        let payload = serde_json::to_vec_pretty(&preset).map_err(|error| error.to_string())?;
+        fs::write(&temporary, payload).map_err(|error| error.to_string())?;
+        fs::rename(&temporary, destination).map_err(|error| error.to_string())?;
+        fs::write(self.directory.join(".active"), format!("{}\n", preset.name))
+            .map_err(|error| error.to_string())?;
+        self.presets
+            .lock()
+            .expect("preset mutex")
+            .insert(preset.name.clone(), preset.clone());
+        *self.active.lock().expect("active preset mutex") = preset.name.clone();
+        self.workflows.note_kind(
+            "timing",
+            format!("Saved and activated show preset {}", preset.name),
+        );
+        Ok(())
+    }
+
+    fn activate(&self, name: &str) -> Result<(), String> {
+        let preset = self
+            .presets
+            .lock()
+            .expect("preset mutex")
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("unknown show preset `{name}`"))?;
+        self.apply(&preset)?;
+        fs::create_dir_all(&self.directory).map_err(|error| error.to_string())?;
+        fs::write(self.directory.join(".active"), format!("{name}\n"))
+            .map_err(|error| error.to_string())?;
+        *self.active.lock().expect("active preset mutex") = name.into();
+        self.workflows
+            .note_kind("timing", format!("Activated show preset {name}"));
+        Ok(())
+    }
+}
+
+fn preset_file_name(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(
+            "preset name may contain only letters, numbers, hyphens, and underscores".into(),
+        );
+    }
+    Ok(format!("{name}.json"))
+}
+
+fn validate_preset(preset: &ShowPreset) -> Result<(), String> {
+    preset_file_name(&preset.name)?;
+    if preset.version != 1 || preset.nodes.is_empty() || preset.nodes.len() > 32 {
+        return Err("unsupported or empty show preset".into());
+    }
+    if preset
+        .nodes
+        .iter()
+        .any(|node| node.node_id.is_empty() || node.node_id.len() > 128)
+    {
+        return Err("invalid show preset node".into());
+    }
+    Ok(())
+}
+
+fn validate_cue_override(configured: Option<&str>, proposed: Option<&str>) -> Result<(), String> {
+    match (configured, proposed) {
+        (None, None) => Ok(()),
+        (Some(configured), Some(proposed)) if configured.starts_with("dc:c:") => {
+            let fields: Vec<_> = proposed.split(':').collect();
+            if fields.len() != 8 || fields[0..2] != ["dc", "c"] || !matches!(fields[2], "f" | "r") {
+                return Err("invalid DC curve cue".into());
+            }
+            let values: Vec<u32> = fields[3..]
+                .iter()
+                .map(|value| {
+                    value
+                        .parse()
+                        .map_err(|_| "invalid DC curve cue".to_string())
+                })
+                .collect::<Result<_, _>>()?;
+            let (peak, minimum, ramp, hold, fade) =
+                (values[0], values[1], values[2], values[3], values[4]);
+            if peak == 0
+                || peak > 255
+                || minimum > peak
+                || !(50..=9_999).contains(&ramp)
+                || hold > 9_999
+                || !(50..=9_999).contains(&fade)
+                || ramp + hold + fade > 20_000
+            {
+                return Err("DC curve cue is outside safe tuning bounds".into());
+            }
+            Ok(())
+        }
+        (Some(configured), Some(proposed)) if configured.starts_with("step:") => {
+            let configured: Vec<_> = configured.split(':').collect();
+            let proposed: Vec<_> = proposed.split(':').collect();
+            if configured.len() != 4 || proposed.len() != 4 || configured[..3] != proposed[..3] {
+                return Err("stepper preset may only change the configured stroke RPM".into());
+            }
+            let rpm: u16 = proposed[3].parse().map_err(|_| "invalid stepper RPM")?;
+            if !(10..=120).contains(&rpm) {
+                return Err("stepper RPM must be between 10 and 120".into());
+            }
+            Ok(())
+        }
+        (Some(configured), Some(proposed)) if configured == proposed => Ok(()),
+        _ => Err("preset cannot add, remove, or retarget a configured cue".into()),
+    }
 }
 
 #[derive(Clone)]
@@ -510,6 +745,14 @@ fn app(static_dir: PathBuf, screen_id: String, hub: ScreenHub, control: ControlS
         .route("/api/status", get(runtime_status))
         .route("/api/system", get(system_status))
         .route("/api/timing", axum::routing::post(update_timing))
+        .route(
+            "/api/show-presets",
+            get(show_presets).post(save_show_preset),
+        )
+        .route(
+            "/api/show-presets/{name}/activate",
+            axum::routing::post(activate_show_preset),
+        )
         .route("/api/runtime/reload", axum::routing::post(runtime_reload))
         .route(
             "/api/lifecycle/broker/restart",
@@ -747,6 +990,38 @@ async fn update_timing(
         .set_timing(&body.node_id, body.at_ms)
     {
         Ok(()) => Json(serde_json::json!({ "status": "updated" })).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+    }
+}
+
+async fn show_presets(State(state): State<WebState>) -> Json<ShowPresetLibrary> {
+    Json(state.control.presets.snapshot())
+}
+
+async fn save_show_preset(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Json(preset): Json<ShowPreset>,
+) -> Response {
+    if !same_origin_or_non_browser(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match state.control.presets.save_and_activate(preset) {
+        Ok(()) => Json(state.control.presets.snapshot()).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+    }
+}
+
+async fn activate_show_preset(
+    AxumPath(name): AxumPath<String>,
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> Response {
+    if !same_origin_or_non_browser(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match state.control.presets.activate(&name) {
+        Ok(()) => Json(state.control.presets.snapshot()).into_response(),
         Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
     }
 }
@@ -1161,6 +1436,71 @@ mod tests {
         assert!(decode_client(&"x".repeat(MAX_FRAME_BYTES + 1)).is_none());
     }
 
+    #[test]
+    fn saved_show_preset_drives_the_next_run_and_survives_restart() {
+        let directory =
+            std::env::temp_dir().join(format!("fx-preset-test-{}", uuid::Uuid::new_v4()));
+        let preset = ShowPreset {
+            version: 1,
+            name: "tractor_night".into(),
+            nodes: vec![ShowPresetNode {
+                node_id: "integration/dc-a-pulse".into(),
+                at_ms: 4250,
+                cue: Some("dc:c:f:160:45:250:900:3200".into()),
+            }],
+        };
+        let first_hub = crate::workflow::WorkflowHub::default();
+        first_hub.register_timing(
+            "integration",
+            crate::show_config::FlowRole::Show,
+            "dc-a-pulse",
+            "integration/dc-a-pulse",
+            4000,
+            Vec::new(),
+            None,
+        );
+        let first_store =
+            ShowPresetStore::new(directory.clone(), preset.clone(), first_hub.clone());
+        let mut retargeted = preset.clone();
+        retargeted.nodes[0].cue = Some("step:rev:1600:80".into());
+        assert!(first_store.save_and_activate(retargeted).is_err());
+        let mut foreign_node = preset.clone();
+        foreign_node.nodes[0].node_id = "reset/home-lift-a".into();
+        assert!(first_store.save_and_activate(foreign_node).is_err());
+        first_store.save_and_activate(preset.clone()).unwrap();
+        assert_eq!(first_hub.snapshot().timings[0].at_ms, 4250);
+        assert_eq!(
+            first_hub.cue_for("integration/dc-a-pulse", "old"),
+            preset.nodes[0].cue.clone().unwrap()
+        );
+
+        let restarted_hub = crate::workflow::WorkflowHub::default();
+        restarted_hub.register_timing(
+            "integration",
+            crate::show_config::FlowRole::Show,
+            "dc-a-pulse",
+            "integration/dc-a-pulse",
+            4000,
+            Vec::new(),
+            None,
+        );
+        let restarted = ShowPresetStore::new(
+            directory,
+            ShowPreset {
+                version: 1,
+                name: "default".into(),
+                nodes: preset.nodes.clone(),
+            },
+            restarted_hub.clone(),
+        );
+        assert_eq!(restarted.snapshot().active, "tractor_night");
+        assert_eq!(restarted_hub.snapshot().timings[0].at_ms, 4250);
+        assert_eq!(
+            restarted_hub.cue_for("integration/dc-a-pulse", "old"),
+            preset.nodes[0].cue.clone().unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn real_websocket_synchronizes_then_receives_an_ordered_command() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1179,6 +1519,16 @@ mod tests {
         ]);
         let (control_sender, _control_receiver) = mpsc::channel(1);
         let (volume_sender, _volume_receiver) = mpsc::channel(1);
+        let workflows = crate::workflow::WorkflowHub::default();
+        let presets = ShowPresetStore::new(
+            std::env::temp_dir().join(format!("fx-web-test-{}", uuid::Uuid::new_v4())),
+            ShowPreset {
+                version: 1,
+                name: "default".into(),
+                nodes: Vec::new(),
+            },
+            workflows.clone(),
+        );
         let server_app = app(
             std::env::temp_dir(),
             "tractor-eye".into(),
@@ -1195,8 +1545,9 @@ mod tests {
                 volume_sender,
                 reload_sender: None,
                 boards: BoardRegistry::default(),
-                workflows: crate::workflow::WorkflowHub::default(),
+                workflows,
                 system: SystemRegistry::default(),
+                presets,
             },
         );
         let server = tokio::spawn(async move {

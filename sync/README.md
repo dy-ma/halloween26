@@ -135,35 +135,24 @@ The server rejects PWM on timed moves, displays, steppers and other controls;
 clients cannot provide arbitrary cue text or change a configured control's
 target.
 
-The dashboard's **Motion timing tuner** is a separate, bounded programmed
-mode. It ramps from zero to a peak, holds, then follows a quintic smooth fade
-to a final PWM before stopping. Peak/final PWM, ramp, hold, fade, direction,
-audio track/output, and the motor's offset from audio start can be adjusted;
-the draft is saved in that browser. Field changes never move the motor. A run
-is submitted as structured parameters, and `fx` will only route it to a DC sink
-already represented by an adjustable jog control. It does not accept arbitrary
-cue text from the browser. The controller evaluates the curve locally at motor
-loop speed, so network jitter cannot turn the profile into discrete PWM jumps.
+The dashboard's **Studio** graph is the editor for the real, state-gated show.
+Peak/final PWM, ramp, hold, fade, direction, motor offset, eye wake offset,
+stepper offset, and stepper RPM are applied to the same workflow used by the
+horn trigger. **Play show** first activates the visible settings, then invokes
+the configured show control; it is accepted only while the controller is Ready.
+The motor board evaluates its curve locally, so network jitter cannot turn the
+profile into discrete PWM jumps.
 
-Use **Play** with the **Audio**, **DC motor**, **Stepper**, and **Eye** checkboxes to apply any
-combination, and **Stop all** at any point. Unchecking a component does not
-change its saved settings or the other components' offsets. Motor and wake
-delays are relative to Play even when Audio is unchecked. Unchecked graph
-components are faded for reference. The graph's playhead is a UI preview; the
-board is authoritative. Both limit inputs are checked before motion and every
-loop during motion. A limit immediately turns outputs off and reports
-`dc:limit:fwd` or `dc:limit:rev`. Final PWM is open-loop and must be calibrated
-under the real load: a value below the motion threshold can stall and heat a
-motor. Once tuned, the compact cue printed below the graph can be placed in a
-show node's `cue.emit`.
+Studio saves named JSON presets under `sync/shows/presets/` beside the active
+show file. The active preset name is stored there too, and is restored by the
+next `fx` process. Preset filenames accept letters, numbers, hyphens, and
+underscores. Saving does not move anything. **Reset** and **Stop all** remain
+direct state-machine controls.
 
-The Stepper controls select an existing finite stroke, peak speed (10–120 RPM),
-and delay (0–10,000 ms from Play). The runtime reuses the configured stroke's
-direction, pulse count, board, link, and delivery lifetime; the dashboard cannot
-substitute arbitrary cue text or a different destination. The Stepper checkbox
-starts unchecked and is saved with the other browser preferences. Stepper-only
-trials do not dispatch DC, eye, or audio actions. All four components are planned
-in one runtime workflow, and Stop all cancels delayed strokes before dispatch.
+The Stepper controls retain the configured finite stroke's direction, pulse
+count, board, link, and delivery lifetime. Studio only changes its peak speed
+(10–120 RPM) and execution offset. Stop all cancels delayed strokes before
+dispatch.
 
 The separate amber RPM lane previews the MQTT firmware's existing quintic
 S-curve. It uses 1,600 pulses/revolution, integer pulse periods, a maximum of 300
@@ -175,9 +164,6 @@ firmware-managed and cannot be edited here. Legacy transports show a constant-
 speed estimate labelled as potentially different instead of claiming MQTT ramp
 timings. Existing ESP-NOW firmware and stroke controls are unchanged.
 
-The tuner also has an optional **Eye display** selector and **Eye wake delay**
-(0–10,000 ms from audio start). Choose a currently connected saved display and
-check **Eye** to include it in the same runtime run.
 The graph overlays Wake, Tip look, and Look settled markers; the legend also
 shows when opening begins. Wake is one command: opening starts at +180 ms,
 the tipping look starts at +4,000 ms and settles at +6,400 ms. These are planned
@@ -186,15 +172,9 @@ constants with the actual animation. Only the overall wake offset is editable;
 the animation's internal sections remain unchanged. The eye stays awake after
 settling, with its normal idle movements.
 
-Eye selection is optional and saved alongside the existing browser draft
-without changing its motor settings. It uses the persistent browser device ID,
-so reconnecting does not require choosing a new connection. All current tabs of
-that saved device receive a private Wake; unrelated displays do not. An offline
-selection rejects a run that includes Eye before anything is scheduled; uncheck
-Eye to test other components independently. **Stop all** cancels any pending wake along
-with pending motor/audio actions; the existing show stop/reset controls handle
-the eye's already-running animation. Each Wake restarts the sequence from a
-closed pose, so a manual Reset is not required between timing trials.
+The configured show continues to choose the audio asset, output, eye role, and
+all hardware destinations. Studio does not retarget hardware. **Stop all**
+cancels pending eye, motor, stepper, and audio actions.
 
 For isolated verification without motors, run `fx run --config
 sync/shows/dc-pwm-smoke.toml --no-kiosk --log-file /tmp/fx-dc-pwm-smoke.log`
