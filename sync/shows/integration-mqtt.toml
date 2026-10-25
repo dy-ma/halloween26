@@ -47,16 +47,13 @@ type = "audio"
 device = "jbl"
 volume = 0.70
 
-# Replace these three targets with the 12-digit node IDs printed by each board.
+# Replace these targets with the 12-digit node IDs printed by each board.
+# Lift B belongs to the separate Tractor B attraction and is intentionally
+# excluded from this Tractor A manifest.
 [sinks.dc_a]
 type = "cue"
 link = "radio"
 target = "1CDBD45CFDF0"
-
-[sinks.dc_b]
-type = "cue"
-link = "radio"
-target = "1CDBD45CFF78"
 
 [sinks.stepper]
 type = "cue"
@@ -76,24 +73,6 @@ to = "low"
 failure = "fault"
 
 [props.lift_a.transitions.raise]
-from = ["low"]
-active = "raising"
-to = "high"
-failure = "fault"
-
-[props.lift_b]
-label = "Lift B"
-initial = "unknown"
-ready = "low"
-states = ["unknown", "homing-down", "low", "raising", "high", "halted", "fault"]
-
-[props.lift_b.transitions.home]
-from = ["unknown", "low", "high", "halted", "fault"]
-active = "homing-down"
-to = "low"
-failure = "fault"
-
-[props.lift_b.transitions.raise]
 from = ["low"]
 active = "raising"
 to = "high"
@@ -140,12 +119,6 @@ transition = "lift_a.raise"
 action = { type = "cue.emit", sink = "dc_a", cue = "dc:c:f:153:51:300:700:3500", wait_for = "dc:complete", timeout_ms = 6000 }
 
 [[flows.integration.nodes]]
-id = "dc-b-pulse"
-at_ms = 4000
-transition = "lift_b.raise"
-action = { type = "cue.emit", sink = "dc_b", cue = "dc:c:r:153:51:300:700:3500", wait_for = "dc:complete", timeout_ms = 6000 }
-
-[[flows.integration.nodes]]
 id = "stepper-turn"
 at_ms = 9000
 # Hardware-timed S-curve: 80 RPM peak, acceleration/deceleration from/to rest.
@@ -184,17 +157,11 @@ action = { type = "audio.hold.stop", key = "horn" }
 trigger = { source = "remote", cue = "show:reset" }
 role = "reset"
 
-# The two lifts are mounted in opposite orientations: A lowers in reverse and
-# B lowers forward. Each command ends locally at its lower limit switch.
+# Tractor A's lift lowers in reverse and ends locally at its lower limit switch.
 [[flows.reset.nodes]]
 id = "home-lift-a"
 transition = "lift_a.home"
 action = { type = "cue.emit", sink = "dc_a", cue = "dc:rev:90:20000", wait_for = "dc:limit:rev", timeout_ms = 22000 }
-
-[[flows.reset.nodes]]
-id = "home-lift-b"
-transition = "lift_b.home"
-action = { type = "cue.emit", sink = "dc_b", cue = "dc:fwd:90:20000", wait_for = "dc:limit:fwd", timeout_ms = 22000 }
 
 [flows.bench_audio]
 trigger = { source = "remote", cue = "bench:audio" }
@@ -224,10 +191,6 @@ role = "stop"
 [[flows.stop_all.nodes]]
 id = "stop-dc-a"
 action = { type = "cue.emit", sink = "dc_a", cue = "dc:stop" }
-
-[[flows.stop_all.nodes]]
-id = "stop-dc-b"
-action = { type = "cue.emit", sink = "dc_b", cue = "dc:stop" }
 
 [[flows.stop_all.nodes]]
 id = "stop-stepper"
@@ -298,28 +261,6 @@ release_cue = "dc:stop"
 repeat_ms = 100
 expires_after_ms = 500
 key = "s"
-
-[controls.dc_b_forward]
-type = "cue"
-label = "Lift B down"
-sink = "dc_b"
-panel = "lift_b"
-cue = "dc:jog:fwd:255"
-release_cue = "dc:stop"
-repeat_ms = 100
-expires_after_ms = 500
-key = "ArrowUp"
-
-[controls.dc_b_reverse]
-type = "cue"
-label = "Lift B up"
-sink = "dc_b"
-panel = "lift_b"
-cue = "dc:jog:rev:255"
-release_cue = "dc:stop"
-repeat_ms = 100
-expires_after_ms = 500
-key = "ArrowDown"
 
 [controls.stepper_stroke]
 type = "cue"
