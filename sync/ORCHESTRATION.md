@@ -119,7 +119,11 @@ The motor cue is bounded: reaching its timer without the requested limit is
 a failure of `raise`, not success. Physical stop is enforced on the board.
 
 A cue action without `wait_for` completes when queued, preserving the old
-fire-and-forget behavior. Set `wait_for` to opt into assembly completion.
+fire-and-forget behavior. Set `wait_for` to one status string to require that
+specific assembly completion, or to an array when any listed terminal outcome
+is successful. For example, `wait_for = ["dc:limit:fwd", "dc:complete"]`
+allows a limit switch to end a prerecorded move early while also accepting the
+full recorded duration.
 `timeout_ms` defaults to 10000, with a maximum of 600000. Failures/timeouts
 skip dependent nodes; independent branches continue. No automatic rollback
 or motor reversal is attempted. STOP ALL (`stop_all` control or `show:stop`
@@ -180,7 +184,7 @@ step:complete:0123456789ABCDEF
 A stale event, another motor's event, MQTT broker receipt, or transport ACK
 cannot satisfy a physical completion dependency. Status names before the
 suffix are limited to 14 bytes. A different terminal report (stopped,
-replaced, invalid, expired, or another limit) fails the waiting node.
+replaced, invalid, expired, or an unlisted limit) fails the waiting node.
 
 The updated DC firmware reports running/pending, stopped, superseded,
 timer completion, jog lease expiry, invalid commands, and configured limits.

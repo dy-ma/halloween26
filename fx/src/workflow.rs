@@ -662,10 +662,11 @@ pub async fn wait_for_status(
     link: &str,
     node: &str,
     command: u64,
-    event: &str,
+    events: &[String],
     timeout_ms: u64,
 ) -> Result<String, String> {
     let command_id = format!("{command:016X}");
+    let expected = events.join(" or ");
     tokio::time::timeout(Duration::from_millis(timeout_ms), async {
         loop {
             let status = receiver
@@ -678,8 +679,8 @@ pub async fn wait_for_status(
             {
                 continue;
             }
-            if status.event == event {
-                return Ok(format!("assembly reported {event}"));
+            if events.iter().any(|event| status.event == *event) {
+                return Ok(format!("assembly reported {}", status.event));
             }
             // A different terminal outcome for this command must not release dependents.
             if [
@@ -696,14 +697,14 @@ pub async fn wait_for_status(
                 || status.event.contains(":limit:")
             {
                 return Err(format!(
-                    "expected {event}, assembly reported {}",
+                    "expected {expected}, assembly reported {}",
                     status.event
                 ));
             }
         }
     })
     .await
-    .map_err(|_| format!("timed out waiting for {event} from {node}"))?
+    .map_err(|_| format!("timed out waiting for {expected} from {node}"))?
 }
 
 #[cfg(test)]
@@ -757,9 +758,16 @@ mod tests {
             });
         }
         assert!(
-            wait_for_status(rx, "radio", "AABBCCDDEEFF", 10, "dc:limit:fwd", 100)
-                .await
-                .is_ok()
+            wait_for_status(
+                rx,
+                "radio",
+                "AABBCCDDEEFF",
+                10,
+                &["dc:limit:fwd".into(), "dc:complete".into()],
+                100,
+            )
+            .await
+            .is_ok()
         );
         assert!(
             wait_for_status(
@@ -767,7 +775,7 @@ mod tests {
                 "radio",
                 "AABBCCDDEEFF",
                 11,
-                "dc:complete",
+                &["dc:complete".into()],
                 1
             )
             .await
@@ -794,7 +802,7 @@ mod tests {
                 cue: "dc:fwd:70:100".into(),
                 schedule_at_board: true,
                 expires_after_ms: 500,
-                wait_for: wait.then(|| "dc:complete".into()),
+                wait_for: wait.then(|| vec!["dc:complete".into()]),
                 timeout_ms: 100,
             },
         }

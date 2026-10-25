@@ -355,7 +355,7 @@ enum RuntimeAction {
         cue: String,
         schedule_at_board: bool,
         expires_after_ms: u64,
-        wait_for: Option<String>,
+        wait_for: Option<Vec<String>>,
         timeout_ms: u64,
     },
 }
@@ -1636,7 +1636,7 @@ fn compile_flows(
                             show_config::LinkConfig::MqttCue { .. }
                         ),
                         expires_after_ms: *expires_after_ms,
-                        wait_for: wait_for.clone(),
+                        wait_for: wait_for.as_ref().map(show_config::CompletionEvents::to_vec),
                         timeout_ms: *timeout_ms,
                     }
                 }
@@ -1971,14 +1971,14 @@ async fn execute_node(
                     .unwrap_or_default(),
             );
             match wait_for {
-                Some(event) => {
+                Some(events) => {
                     let timeout_ms = timeout_ms.saturating_add(
                         execute_at_ms
                             .unwrap_or(0)
                             .saturating_sub(workflow::now_ms()),
                     );
                     workflow::wait_for_status(
-                        receiver, &link, &target, command_id, &event, timeout_ms,
+                        receiver, &link, &target, command_id, &events, timeout_ms,
                     )
                     .await
                 }

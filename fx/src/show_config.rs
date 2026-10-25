@@ -303,11 +303,27 @@ pub enum ActionConfig {
         cue: String,
         #[serde(default = "default_action_lifetime_ms")]
         expires_after_ms: u64,
-        /// Physical application status, correlated to this command (not its ACK).
-        wait_for: Option<String>,
+        /// Physical application status(es), correlated to this command (not its ACK).
+        wait_for: Option<CompletionEvents>,
         #[serde(default = "default_completion_timeout_ms")]
         timeout_ms: u64,
     },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CompletionEvents {
+    One(String),
+    Any(Vec<String>),
+}
+
+impl CompletionEvents {
+    pub fn to_vec(&self) -> Vec<String> {
+        match self {
+            Self::One(event) => vec![event.clone()],
+            Self::Any(events) => events.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -947,11 +963,18 @@ fn validate_action(config: &ShowConfig, flow_name: &str, node: &NodeConfig) -> R
             };
             validate_lifetime(*expires_after_ms, &field)?;
             validate_cue_name(&qualified_cue(namespace, cue), &format!("{field}.cue"))?;
-            if let Some(event) = wait_for {
+            if let Some(wait_for) = wait_for {
+                let events = wait_for.to_vec();
                 // Status wire names reserve 17 bytes for :<16-hex-command-id>.
-                if event.is_empty() || event.len() > 14 || !(1..=600_000).contains(timeout_ms) {
+                if events.is_empty()
+                    || events
+                        .iter()
+                        .any(|event| event.is_empty() || event.len() > 14)
+                    || events.iter().collect::<BTreeSet<_>>().len() != events.len()
+                    || !(1..=600_000).contains(timeout_ms)
+                {
                     return Err(FxError::ShowConfig(format!(
-                        "{field}: wait_for must be 1–14 bytes and timeout_ms 1–600000"
+                        "{field}: wait_for must contain unique 1–14 byte events and timeout_ms 1–600000"
                     )));
                 }
             }

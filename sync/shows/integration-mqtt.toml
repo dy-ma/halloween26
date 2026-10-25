@@ -116,10 +116,9 @@ action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" 
 id = "dc-a-pulse"
 at_ms = 4000
 transition = "lift_a.raise"
-# The upper limit defines the displayed high position. Reaching it is the
-# successful end of this transition; timing out first means the lift failed to
-# reach its calibrated position.
-action = { type = "cue.emit", sink = "dc_a", cue = "dc:c:f:153:51:300:700:3500", wait_for = "dc:limit:fwd", timeout_ms = 6000 }
+# The upper limit may end the recorded profile early. Either reaching it or
+# completing the prerecorded motion is a successful show transition.
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:c:f:153:51:300:700:3500", wait_for = ["dc:limit:fwd", "dc:complete"], timeout_ms = 6000 }
 
 [[flows.integration.nodes]]
 id = "stepper-turn"
