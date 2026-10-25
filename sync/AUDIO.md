@@ -88,7 +88,9 @@ MQTT retries cannot layer copies or restart the show.
 By default the entire resident clip loops. For a more natural extendable horn,
 keep an attack at the front of the WAV and choose a steady, zero-crossing loop
 region with `loop_start_ms` and `loop_end_ms` on both hold-start actions. The
-attack plays once; only that region repeats. Release currently stops
+attack plays once; only that region repeats. The production `horn.wav` is a
+970 ms extraction from the beginning of the existing trimmed show audio; its
+waveform-matched sustain runs from 484 through 710 ms. Release currently stops
 immediately, which is appropriate for a push-button horn and can later be
 extended with a separate release tail if the source recording needs one.
 

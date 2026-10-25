@@ -22,7 +22,7 @@ link = "inbound"
 
 [assets.horn]
 type = "audio"
-file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
+file = "/home/dyma/audio/horn.wav"
 
 # A ready but normally unconnected Pi output. The action is muted, and this
 # isolated profile never selects the production JBL alias.
@@ -72,14 +72,14 @@ trigger = { source = "horn", cue = "horn:pushed" }
 
 [[flows.horn_audio.nodes]]
 id = "horn"
-action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, lease_ms = 1200 }
+action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, loop_start_ms = 484, loop_end_ms = 710, lease_ms = 1200 }
 
 [flows.horn_held]
 trigger = { source = "horn", cue = "horn:held" }
 
 [[flows.horn_held.nodes]]
 id = "horn"
-action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, lease_ms = 1200 }
+action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, loop_start_ms = 484, loop_end_ms = 710, lease_ms = 1200 }
 
 [flows.horn_released]
 trigger = { source = "horn", cue = "horn:released" }

@@ -29,6 +29,10 @@ link = "radio"
 type = "audio"
 file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
 
+[assets.horn]
+type = "audio"
+file = "/home/dyma/audio/horn.wav"
+
 [sinks.eye]
 type = "screen"
 screen_id = "tractor-eye"
@@ -147,7 +151,7 @@ trigger = { source = "remote", cue = "horn:pushed" }
 
 [[flows.horn_audio.nodes]]
 id = "play-horn"
-action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "tractor_tip", lease_ms = 1200 }
+action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "horn", loop_start_ms = 484, loop_end_ms = 710, lease_ms = 1200 }
 
 # The horn board sends these while its switch remains down. Starting a named
 # hold is idempotent, so this only renews the safety lease—it cannot layer more
@@ -157,7 +161,7 @@ trigger = { source = "remote", cue = "horn:held" }
 
 [[flows.horn_held.nodes]]
 id = "renew-horn"
-action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "tractor_tip", lease_ms = 1200 }
+action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "horn", loop_start_ms = 484, loop_end_ms = 710, lease_ms = 1200 }
 
 [flows.horn_released]
 trigger = { source = "remote", cue = "horn:released" }
