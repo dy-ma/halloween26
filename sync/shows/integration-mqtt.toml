@@ -116,7 +116,10 @@ action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" 
 id = "dc-a-pulse"
 at_ms = 4000
 transition = "lift_a.raise"
-action = { type = "cue.emit", sink = "dc_a", cue = "dc:c:f:153:51:300:700:3500", wait_for = "dc:complete", timeout_ms = 6000 }
+# The upper limit defines the displayed high position. Reaching it is the
+# successful end of this transition; timing out first means the lift failed to
+# reach its calibrated position.
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:c:f:153:51:300:700:3500", wait_for = "dc:limit:fwd", timeout_ms = 6000 }
 
 [[flows.integration.nodes]]
 id = "stepper-turn"
@@ -162,6 +165,10 @@ role = "reset"
 id = "home-lift-a"
 transition = "lift_a.home"
 action = { type = "cue.emit", sink = "dc_a", cue = "dc:rev:90:20000", wait_for = "dc:limit:rev", timeout_ms = 22000 }
+
+[[flows.reset.nodes]]
+id = "reset-eye"
+action = { type = "screen.command", sink = "eye", command = { type = "system/reset" }, final_state = { mode = "sleeping", gaze = { x = 0.0, y = 0.0 } } }
 
 [flows.bench_audio]
 trigger = { source = "remote", cue = "bench:audio" }
@@ -212,7 +219,7 @@ flow = "stop_all"
 
 [controls.reset_show]
 type = "flow"
-label = "Reset and home lifts"
+label = "Reset eye and home Lift A"
 flow = "reset"
 panel = "show"
 section = "show"
