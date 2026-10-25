@@ -424,6 +424,8 @@ enum AudioBody {
         track: String,
         output: String,
         volume: Option<f32>,
+        #[serde(default)]
+        r#loop: bool,
     },
     Stop {
         playback: String,
@@ -577,11 +579,7 @@ async fn broker_restart(State(state): State<WebState>, headers: HeaderMap) -> Re
     }
     let restart = tokio::task::spawn_blocking(|| {
         Command::new("systemctl")
-            .args([
-                "--no-ask-password",
-                "restart",
-                "mosquitto.service",
-            ])
+            .args(["--no-ask-password", "restart", "mosquitto.service"])
             .output()
     });
     match timeout(Duration::from_secs(8), restart).await {
@@ -777,11 +775,18 @@ async fn audio_action(
             track,
             output,
             volume,
+            r#loop,
         } => {
-            return match audio
-                .play(&track, &output, volume, &state.control.workflows)
-                .await
-            {
+            let result = if r#loop {
+                audio
+                    .play_loop(&track, &output, volume, &state.control.workflows)
+                    .await
+            } else {
+                audio
+                    .play(&track, &output, volume, &state.control.workflows)
+                    .await
+            };
+            return match result {
                 Ok(ticket) => (
                     StatusCode::ACCEPTED,
                     Json(serde_json::json!({ "playback": ticket.id })),

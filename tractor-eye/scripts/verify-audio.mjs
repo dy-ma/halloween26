@@ -18,9 +18,9 @@ async function until(check, timeout = 15000) {
   throw new Error('Audio test deadline exceeded')
 }
 const a = 'pipewire:fx_audio_test_a', b = 'pipewire:fx_audio_test_b'
-const play = async (track, output) => {
+const play = async (track, output, loop = false) => {
   assert.ok([a, b].includes(output))
-  const response = await post('/api/audio', { type: 'play', track, output, volume: 0 })
+  const response = await post('/api/audio', { type: 'play', track, output, volume: 0, loop })
   assert.equal(response.status, 202, await response.clone().text())
   return (await response.json()).playback
 }
@@ -56,6 +56,11 @@ try {
   await until(async () => !(await read('/api/audio')).playbacks.some(job => job.phase === 'playing'))
   const natural = await play('tractor_tip', a)
   await phase(natural, 'finished')
+  const ambient = await play('tractor_tip', a, true)
+  const trackDuration = initial.tracks.find(track => track.id === 'tractor_tip').durationMs
+  await new Promise(resolve => setTimeout(resolve, trackDuration + 750))
+  assert.equal((await read('/api/audio')).playbacks.find(job => job.id === ambient)?.phase, 'playing', 'ambient loop must survive the first end-of-file')
+  await stop(ambient); await phase(ambient, 'stopped')
   await control('audio_dag')
   await until(async () => {
     const run = (await read('/api/status')).runs.find(run => run.reason === 'control `audio_dag`')
@@ -66,7 +71,7 @@ try {
   assert.equal(child.output, b)
   assert.equal(child.track, 'tractor_source')
   await stop(child.id); await phase(child.id, 'stopped')
-  console.log(JSON.stringify({ passed: true, checks: ['track catalog with WAV durations', 'different files layered on one output', 'independent second output', 'shared dashboard/DAG playback limit', 'unknown tracks and outputs rejected', 'individual Stop leaves other voices running', 'stopped DAG audio skips dependents', 'per-output volume', 'STOP ALL stops managed audio', 'natural end-of-file completion', 'DAG child starts after parent audio finishes'] }, null, 2))
+  console.log(JSON.stringify({ passed: true, checks: ['track catalog with WAV durations', 'different files layered on one output', 'independent second output', 'shared dashboard/DAG playback limit', 'unknown tracks and outputs rejected', 'individual Stop leaves other voices running', 'stopped DAG audio skips dependents', 'per-output volume', 'STOP ALL stops managed audio', 'natural end-of-file completion', 'ambient loop survives end-of-file until Stop', 'DAG child starts after parent audio finishes'] }, null, 2))
 } finally {
   await control('stop_all')
 }

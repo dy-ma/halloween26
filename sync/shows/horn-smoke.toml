@@ -72,7 +72,21 @@ trigger = { source = "horn", cue = "horn:pushed" }
 
 [[flows.horn_audio.nodes]]
 id = "horn"
-action = { type = "audio.trigger", sink = "test_audio", asset = "horn", volume = 0.0 }
+action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, lease_ms = 1200 }
+
+[flows.horn_held]
+trigger = { source = "horn", cue = "horn:held" }
+
+[[flows.horn_held.nodes]]
+id = "horn"
+action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, lease_ms = 1200 }
+
+[flows.horn_released]
+trigger = { source = "horn", cue = "horn:released" }
+
+[[flows.horn_released.nodes]]
+id = "horn"
+action = { type = "audio.hold.stop", key = "horn" }
 
 [flows.show]
 trigger = { source = "horn", cue = "horn:pushed", aliases = ["show:start"] }

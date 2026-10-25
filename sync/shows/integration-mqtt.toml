@@ -147,7 +147,24 @@ trigger = { source = "remote", cue = "horn:pushed" }
 
 [[flows.horn_audio.nodes]]
 id = "play-horn"
-action = { type = "audio.trigger", sink = "speaker", asset = "tractor_tip" }
+action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "tractor_tip", lease_ms = 1200 }
+
+# The horn board sends these while its switch remains down. Starting a named
+# hold is idempotent, so this only renews the safety lease—it cannot layer more
+# copies or request the show again.
+[flows.horn_held]
+trigger = { source = "remote", cue = "horn:held" }
+
+[[flows.horn_held.nodes]]
+id = "renew-horn"
+action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "tractor_tip", lease_ms = 1200 }
+
+[flows.horn_released]
+trigger = { source = "remote", cue = "horn:released" }
+
+[[flows.horn_released.nodes]]
+id = "stop-horn"
+action = { type = "audio.hold.stop", key = "horn" }
 
 [flows.reset]
 trigger = { source = "remote", cue = "show:reset" }

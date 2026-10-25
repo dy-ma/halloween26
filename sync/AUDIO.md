@@ -41,14 +41,15 @@ default requested PipeWire latency is 20 ms and can be changed with
 may impose a larger codec/radio buffer than PipeWire requests.
 
 Resident clips must be 16-bit PCM WAV, mono or stereo. They are converted to
-48 kHz stereo at startup. Normal `audio.play` voices—including a future looping
-background song—remain separate PipeWire streams and mix with the resident
+48 kHz stereo at startup. Normal `audio.play` voices—including dashboard
+ambient loops—remain separate PipeWire streams and mix with the resident
 channel. The always-open silent stream keeps the transport awake; actual
 background audio may additionally prevent a speaker's own silence gate or
 amplifier sleep from engaging.
 
-The production horn deliberately uses two flows with the same incoming
-`horn:pushed` event:
+The production horn uses a named resident hold. Press starts it, held packets
+renew a 1.2-second safety lease, and release stops it. If the switch board or
+network disappears, the lease stops the sound instead of leaving it on:
 
 ```toml
 [flows.horn_audio]
@@ -56,7 +57,21 @@ trigger = { source = "remote", cue = "horn:pushed" }
 
 [[flows.horn_audio.nodes]]
 id = "horn"
-action = { type = "audio.trigger", sink = "speaker", asset = "horn" }
+action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "horn", lease_ms = 1200 }
+
+[flows.horn_held]
+trigger = { source = "remote", cue = "horn:held" }
+
+[[flows.horn_held.nodes]]
+id = "horn"
+action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "horn", lease_ms = 1200 }
+
+[flows.horn_released]
+trigger = { source = "remote", cue = "horn:released" }
+
+[[flows.horn_released.nodes]]
+id = "horn"
+action = { type = "audio.hold.stop", key = "horn" }
 
 [flows.show]
 trigger = { source = "remote", cue = "horn:pushed", aliases = ["show:start"] }
@@ -66,8 +81,16 @@ role = "show"
 Utility flows are dispatched before stateful flows. Consequently the horn is
 direct feedback and sounds even when the controller rejects the show request;
 the eye and physical assemblies still run only when the controller is Ready.
-The Cue event ID is deduplicated before either branch, so an MQTT retry cannot
-play the horn or start the show twice.
+Only `horn:pushed` requests the show; renew/release packets are audio-only. A
+hold start is idempotent by key, and Cue IDs are deduplicated, so heartbeats and
+MQTT retries cannot layer copies or restart the show.
+
+By default the entire resident clip loops. For a more natural extendable horn,
+keep an attack at the front of the WAV and choose a steady, zero-crossing loop
+region with `loop_start_ms` and `loop_end_ms` on both hold-start actions. The
+attack plays once; only that region repeats. Release currently stops
+immediately, which is appropriate for a push-button horn and can later be
+extended with a separate release tail if the source recording needs one.
 
 ## Library and future clips
 
@@ -92,10 +115,11 @@ dashboard shows availability, file format, and PCM/float WAV duration without
 reading the complete audio into memory. Other formats supported by `pw-play`
 may work, but are not automatically transcoded or duration-probed here.
 
-For now trim/export new WAV clips offline, keeping the master unchanged.
-Later the catalog can gain non-destructive source/clip boundaries without
-coupling clips to a speaker. There is no waveform editor, upload interface,
-looping engine, or time-range playback API in this change.
+For now trim/export new WAV clips offline, keeping the master unchanged. The
+dashboard's Loop checkbox repeats a selected ambient track until its playback
+Stop button is pressed. That general-purpose loop may have a small restart gap;
+the resident horn loop is sample-continuous. There is no waveform editor or
+upload interface.
 
 ## DAG mixing
 
@@ -135,6 +159,7 @@ separate processes/Bluetooth speakers do not provide sample-accurate sync.
 errors, and the shared concurrency limit. `POST /api/audio` accepts:
 
 - `{ "type": "play", "track": "tractor_tip", "output": "speaker" }`
+- `{ "type": "play", "track": "wind", "output": "speaker", "loop": true }`
 - `{ "type": "stop", "playback": "PLAYBACK_UUID" }`
 - `{ "type": "volume", "output": "OUTPUT_ID", "percent": 50 }`
 - `{ "type": "connect", "output": "bluetooth:AA:BB:CC:DD:EE:FF" }`

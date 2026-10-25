@@ -18,8 +18,14 @@
 namespace {
 
 constexpr uint32_t kDebounceMs = 30;
+// A held switch periodically renews the Pi-side horn lease. If this board,
+// Wi-Fi, MQTT, or FX disappears, the lease expires instead of leaving a horn
+// droning forever.
+constexpr uint32_t kHeldIntervalMs = 400;
 constexpr uint64_t kCoordinatorNode = CUE_COORDINATOR_NODE;
-constexpr char kHornEvent[] = "horn:pushed";
+constexpr char kHornPushedEvent[] = "horn:pushed";
+constexpr char kHornHeldEvent[] = "horn:held";
+constexpr char kHornReleasedEvent[] = "horn:released";
 
 sync_transport::Transport::Config transport_config = sync_transport::config("horn");
 sync_transport::Transport transport(transport_config);
@@ -27,21 +33,23 @@ cue::Node node;
 bool reading = HORN_SWITCH_ACTIVE_LEVEL != HIGH;
 bool stable = HORN_SWITCH_ACTIVE_LEVEL != HIGH;
 uint32_t changed_at = 0;
+uint32_t next_held_at = 0;
 
-void sendHorn() {
+void sendHorn(const char* event) {
   if (kCoordinatorNode == 0) {
     if (Serial) Serial.println("horn not configured: set CUE_COORDINATOR_NODE");
     return;
   }
   cue::Message message;
-  if (!node.makeCue(kCoordinatorNode, kHornEvent, message) ||
+  if (!node.makeCue(kCoordinatorNode, event, message) ||
       transport.trySend(message) != cue::SendResult::QUEUED) {
-    if (Serial) Serial.println("horn failed to queue horn:pushed");
+    if (Serial) Serial.printf("horn failed to queue %s\n", event);
     return;
   }
   if (Serial) {
     Serial.printf(
-      "horn queued horn:pushed id=%llu\n",
+      "horn queued %s id=%llu\n",
+      event,
       static_cast<unsigned long long>(message.id)
     );
   }
@@ -55,7 +63,17 @@ void updateSwitch(uint32_t now) {
   }
   if (reading != stable && now - changed_at >= kDebounceMs) {
     stable = reading;
-    if (stable == HORN_SWITCH_ACTIVE_LEVEL) sendHorn();
+    if (stable == HORN_SWITCH_ACTIVE_LEVEL) {
+      sendHorn(kHornPushedEvent);
+      next_held_at = now + kHeldIntervalMs;
+    } else {
+      sendHorn(kHornReleasedEvent);
+    }
+  }
+  if (stable == HORN_SWITCH_ACTIVE_LEVEL &&
+      static_cast<int32_t>(now - next_held_at) >= 0) {
+    sendHorn(kHornHeldEvent);
+    next_held_at = now + kHeldIntervalMs;
   }
 }
 
@@ -69,6 +87,10 @@ void setup() {
   if (ready) {
     node.begin(transport.localNode(), esp_random());
     if (kCoordinatorNode != 0) transport.addPeer(kCoordinatorNode);
+  }
+  if (ready && stable == HORN_SWITCH_ACTIVE_LEVEL) {
+    sendHorn(kHornPushedEvent);
+    next_held_at = millis() + kHeldIntervalMs;
   }
   if (Serial) {
     Serial.printf(

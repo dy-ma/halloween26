@@ -269,6 +269,26 @@ pub enum ActionConfig {
         /// Overrides the audio sink's default volume.
         volume: Option<f32>,
     },
+    /// Starts or renews a named, resident audio voice. The clip plays from its
+    /// beginning, then repeats the configured steady-state region until a
+    /// matching stop arrives or the lease expires.
+    #[serde(rename = "audio.hold.start")]
+    AudioHoldStart {
+        sink: String,
+        asset: String,
+        key: String,
+        /// Overrides the audio sink's default volume.
+        volume: Option<f32>,
+        #[serde(default)]
+        loop_start_ms: u64,
+        loop_end_ms: Option<u64>,
+        #[serde(default = "default_audio_hold_lease_ms")]
+        lease_ms: u64,
+    },
+    /// Stops the named resident voice immediately. This is idempotent so a
+    /// release arriving after lease expiry is harmless.
+    #[serde(rename = "audio.hold.stop")]
+    AudioHoldStop { key: String },
     #[serde(rename = "screen.command")]
     ScreenCommand {
         sink: String,
@@ -864,6 +884,40 @@ fn validate_action(config: &ShowConfig, flow_name: &str, node: &NodeConfig) -> R
             }
             validate_volume(*volume, &format!("{field}.volume"))?;
         }
+        ActionConfig::AudioHoldStart {
+            sink,
+            asset,
+            key,
+            volume,
+            loop_start_ms,
+            loop_end_ms,
+            lease_ms,
+        } => {
+            match config.sinks.get(sink) {
+                Some(SinkConfig::Audio { .. }) => {}
+                Some(_) => return Err(wrong_sink_type(&field, sink, "audio")),
+                None => return Err(unknown_reference(&format!("{field}.sink"), sink)),
+            }
+            match config.assets.get(asset) {
+                Some(AssetConfig::Audio { .. }) => {}
+                None => return Err(unknown_reference(&format!("{field}.asset"), asset)),
+            }
+            validate_audio_hold_key(key, &format!("{field}.key"))?;
+            validate_volume(*volume, &format!("{field}.volume"))?;
+            if !(250..=10_000).contains(lease_ms) {
+                return Err(FxError::ShowConfig(format!(
+                    "{field}.lease_ms must be between 250 and 10000"
+                )));
+            }
+            if loop_end_ms.is_some_and(|end| end <= *loop_start_ms) {
+                return Err(FxError::ShowConfig(format!(
+                    "{field}.loop_end_ms must be greater than loop_start_ms"
+                )));
+            }
+        }
+        ActionConfig::AudioHoldStop { key } => {
+            validate_audio_hold_key(key, &format!("{field}.key"))?;
+        }
         ActionConfig::ScreenCommand {
             sink,
             command,
@@ -972,6 +1026,14 @@ fn validate_volume(volume: Option<f32>, field: &str) -> Result<()> {
     }
 }
 
+fn validate_audio_hold_key(key: &str, field: &str) -> Result<()> {
+    if key.trim().is_empty() || key.len() > 64 {
+        Err(FxError::ShowConfig(format!("{field} must be 1..=64 bytes")))
+    } else {
+        Ok(())
+    }
+}
+
 fn active_show_pointer() -> Result<PathBuf> {
     if let Some(directory) = env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(directory).join("fx").join(ACTIVE_SHOW_FILE));
@@ -1014,6 +1076,10 @@ const fn default_dedupe_capacity() -> usize {
 }
 const fn default_action_lifetime_ms() -> u64 {
     2_000
+}
+
+const fn default_audio_hold_lease_ms() -> u64 {
+    1_200
 }
 
 fn default_kiosk_browser() -> PathBuf {

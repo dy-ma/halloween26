@@ -329,6 +329,18 @@ enum RuntimeAction {
         volume: Option<f32>,
         resident: bool,
     },
+    AudioHoldStart {
+        key: String,
+        track: String,
+        sink: String,
+        volume: Option<f32>,
+        loop_start_ms: u64,
+        loop_end_ms: Option<u64>,
+        lease_ms: u64,
+    },
+    AudioHoldStop {
+        key: String,
+    },
     Screen {
         screen_id: String,
         command: screen::EyeCommand,
@@ -1552,6 +1564,35 @@ fn compile_flows(
                         ),
                     }
                 }
+                show_config::ActionConfig::AudioHoldStart {
+                    sink,
+                    asset,
+                    key,
+                    volume,
+                    loop_start_ms,
+                    loop_end_ms,
+                    lease_ms,
+                } => {
+                    let show_config::SinkConfig::Audio {
+                        volume: sink_volume,
+                        ..
+                    } = &show.sinks[sink]
+                    else {
+                        unreachable!("validated audio sink")
+                    };
+                    RuntimeAction::AudioHoldStart {
+                        key: key.clone(),
+                        track: asset.clone(),
+                        sink: sink.clone(),
+                        volume: volume.or(*sink_volume),
+                        loop_start_ms: *loop_start_ms,
+                        loop_end_ms: *loop_end_ms,
+                        lease_ms: *lease_ms,
+                    }
+                }
+                show_config::ActionConfig::AudioHoldStop { key } => {
+                    RuntimeAction::AudioHoldStop { key: key.clone() }
+                }
                 show_config::ActionConfig::ScreenCommand {
                     sink,
                     command,
@@ -1854,6 +1895,32 @@ async fn execute_node(
             };
             ticket.wait().await
         }
+        RuntimeAction::AudioHoldStart {
+            key,
+            track,
+            sink,
+            volume,
+            loop_start_ms,
+            loop_end_ms,
+            lease_ms,
+        } => {
+            workflows
+                .audio()?
+                .start_hold(
+                    &key,
+                    &track,
+                    &sink,
+                    audio_runtime::HoldOptions {
+                        volume,
+                        loop_start_ms,
+                        loop_end_ms,
+                        lease_ms,
+                    },
+                    workflows,
+                )
+                .await
+        }
+        RuntimeAction::AudioHoldStop { key } => workflows.audio()?.stop_hold(&key),
         RuntimeAction::Screen {
             screen_id,
             command,
@@ -2675,6 +2742,10 @@ mod cli_tests {
                         }
                         RuntimeAction::Cue { .. } => 4000,
                         RuntimeAction::Screen { .. } => 750,
+                        RuntimeAction::AudioHoldStart { .. }
+                        | RuntimeAction::AudioHoldStop { .. } => {
+                            panic!("timing tuner must not synthesize horn hold actions")
+                        }
                     }
                 );
             }

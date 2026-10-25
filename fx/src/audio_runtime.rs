@@ -76,6 +76,7 @@ pub struct Playback {
 struct Voice {
     status: Playback,
     stop: watch::Sender<bool>,
+    lease: Option<watch::Sender<Instant>>,
 }
 
 #[derive(Clone)]
@@ -87,6 +88,7 @@ struct ResidentVoice {
     samples: Arc<[i16]>,
     cursor: usize,
     volume: f32,
+    loop_range: Option<(usize, usize)>,
     done: oneshot::Sender<Result<String, String>>,
 }
 
@@ -95,6 +97,7 @@ enum ResidentCommand {
         id: String,
         clip: Arc<ResidentClip>,
         volume: f32,
+        loop_range: Option<(usize, usize)>,
         done: oneshot::Sender<Result<String, String>>,
     },
     Stop {
@@ -112,6 +115,7 @@ struct Inner {
     errors: Vec<String>,
     refreshed: Option<Instant>,
     voices: BTreeMap<String, Voice>,
+    hold_keys: BTreeMap<String, String>,
     stop_generation: u64,
 }
 
@@ -143,6 +147,13 @@ pub struct Ticket {
     pub id: String,
     done: watch::Receiver<Option<Result<String, String>>>,
 }
+
+pub struct HoldOptions {
+    pub volume: Option<f32>,
+    pub loop_start_ms: u64,
+    pub loop_end_ms: Option<u64>,
+    pub lease_ms: u64,
+}
 impl Ticket {
     pub async fn wait(mut self) -> Result<String, String> {
         loop {
@@ -164,9 +175,13 @@ impl AudioRuntime {
         let mut resident_sinks = BTreeSet::new();
         for flow in show.flows.values() {
             for node in &flow.nodes {
-                if let ActionConfig::AudioTrigger { sink, asset, .. } = &node.action {
-                    resident_assets.insert(asset.clone());
-                    resident_sinks.insert(sink.clone());
+                match &node.action {
+                    ActionConfig::AudioTrigger { sink, asset, .. }
+                    | ActionConfig::AudioHoldStart { sink, asset, .. } => {
+                        resident_assets.insert(asset.clone());
+                        resident_sinks.insert(sink.clone());
+                    }
+                    _ => {}
                 }
             }
         }
@@ -226,6 +241,7 @@ impl AudioRuntime {
                 errors: Vec::new(),
                 refreshed: None,
                 voices: BTreeMap::new(),
+                hold_keys: BTreeMap::new(),
                 stop_generation: 0,
             })),
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -459,7 +475,19 @@ impl AudioRuntime {
         log: &WorkflowHub,
     ) -> Result<Ticket, String> {
         let generation = self.inner.lock().unwrap().stop_generation;
-        self.play_in_generation(track, target, volume, log, generation)
+        self.play_in_generation(track, target, volume, log, generation, false)
+            .await
+    }
+
+    pub async fn play_loop(
+        &self,
+        track: &str,
+        target: &str,
+        volume: Option<f32>,
+        log: &WorkflowHub,
+    ) -> Result<Ticket, String> {
+        let generation = self.inner.lock().unwrap().stop_generation;
+        self.play_in_generation(track, target, volume, log, generation, true)
             .await
     }
 
@@ -504,6 +532,7 @@ impl AudioRuntime {
                     id: id.clone(),
                     clip,
                     volume: volume.unwrap_or(1.0),
+                    loop_range: None,
                     done: resident_done,
                 })
                 .map_err(|error| format!("resident audio channel unavailable: {error}"))?;
@@ -524,6 +553,7 @@ impl AudioRuntime {
                 id.clone(),
                 Voice {
                     stop,
+                    lease: None,
                     status: Playback {
                         id: id.clone(),
                         track: track.id.clone(),
@@ -570,6 +600,202 @@ impl AudioRuntime {
         Ok(Ticket { id, done: receiver })
     }
 
+    /// Start or renew a named press-and-hold sound. Starting is idempotent by
+    /// key, so switch heartbeats only move the lease deadline; they never add
+    /// overlapping copies. The resident mixer plays the attack once and then
+    /// wraps the requested loop region until release or lease expiry.
+    pub async fn start_hold(
+        &self,
+        key: &str,
+        track: &str,
+        target: &str,
+        options: HoldOptions,
+        log: &WorkflowHub,
+    ) -> Result<String, String> {
+        let deadline = Instant::now() + Duration::from_millis(options.lease_ms);
+        {
+            let inner = self.inner.lock().unwrap();
+            if let Some(id) = inner.hold_keys.get(key)
+                && let Some(voice) = inner.voices.get(id)
+                && voice.status.phase == "playing"
+                && let Some(lease) = &voice.lease
+            {
+                lease
+                    .send(deadline)
+                    .map_err(|_| "audio hold is no longer active")?;
+                return Ok(format!("audio hold `{key}` renewed"));
+            }
+        }
+
+        let generation = self.inner.lock().unwrap().stop_generation;
+        let track = self.tracks.get(track).ok_or("unknown audio track")?;
+        let clip = track
+            .resident
+            .clone()
+            .ok_or("audio track was not preloaded for resident playback")?;
+        let start = resident_sample_offset(options.loop_start_ms);
+        let end = options
+            .loop_end_ms
+            .map_or(clip.samples.len(), resident_sample_offset);
+        if start >= end || end > clip.samples.len() {
+            return Err(format!(
+                "audio hold loop must fit inside the {:.0}ms resident clip",
+                clip.samples.len() as f64 / RESIDENT_CHANNELS as f64 / RESIDENT_RATE as f64
+                    * 1000.0
+            ));
+        }
+        let output = self.output(target).await?;
+        if !output.ready {
+            return Err(format!("{} is not ready for audio", output.label));
+        }
+        let channel = self.ensure_resident_channel(&output).await?;
+        let permit = self
+            .slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| "all audio playback slots are active")?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (stop, mut stopping) = watch::channel(false);
+        let (lease, mut lease_updates) = watch::channel(deadline);
+        let (resident_done, mut resident_result) = oneshot::channel();
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.stop_generation != generation {
+                return Err("audio start cancelled by STOP ALL".into());
+            }
+            // Another heartbeat can finish the async output lookup first.
+            if let Some(existing) = inner.hold_keys.get(key)
+                && let Some(voice) = inner.voices.get(existing)
+                && voice.status.phase == "playing"
+                && let Some(lease) = &voice.lease
+            {
+                lease
+                    .send(deadline)
+                    .map_err(|_| "audio hold is no longer active")?;
+                return Ok(format!("audio hold `{key}` renewed"));
+            }
+            channel
+                .commands
+                .try_send(ResidentCommand::Play {
+                    id: id.clone(),
+                    clip,
+                    volume: options.volume.unwrap_or(1.0),
+                    loop_range: Some((start, end)),
+                    done: resident_done,
+                })
+                .map_err(|error| format!("resident audio channel unavailable: {error}"))?;
+            while inner.voices.len() >= 128 {
+                let oldest = inner
+                    .voices
+                    .iter()
+                    .filter(|(_, voice)| voice.status.phase != "playing")
+                    .min_by_key(|(_, voice)| voice.status.started_at_ms)
+                    .map(|(id, _)| id.clone());
+                if let Some(oldest) = oldest {
+                    inner.voices.remove(&oldest);
+                } else {
+                    break;
+                }
+            }
+            inner.hold_keys.insert(key.to_string(), id.clone());
+            inner.voices.insert(
+                id.clone(),
+                Voice {
+                    stop,
+                    lease: Some(lease),
+                    status: Playback {
+                        id: id.clone(),
+                        track: track.id.clone(),
+                        output: output.id.clone(),
+                        phase: "playing",
+                        started_at_ms: now_ms(),
+                        detail: format!("{} → {} (held)", track.label, output.label),
+                    },
+                },
+            );
+        }
+        log.note_kind(
+            "audio",
+            format!(
+                "Audio {id}: {} → {} (held as `{key}`)",
+                track.label, output.label
+            ),
+        );
+        let runtime = self.clone();
+        let playback_id = id.clone();
+        let hold_key = key.to_string();
+        let commands = channel.commands.clone();
+        let log = log.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            let result = loop {
+                let deadline = *lease_updates.borrow_and_update();
+                let expiry = tokio::time::sleep_until(deadline.into());
+                tokio::pin!(expiry);
+                tokio::select! {
+                    result = &mut resident_result => break result
+                        .unwrap_or_else(|_| Err("resident audio channel stopped".into())),
+                    _ = stopping.changed() => {
+                        let _ = commands.send(ResidentCommand::Stop { id: playback_id.clone() }).await;
+                        break resident_result.await
+                            .unwrap_or_else(|_| Err("resident audio channel stopped".into()));
+                    }
+                    changed = lease_updates.changed() => {
+                        if changed.is_err() {
+                            let _ = commands.send(ResidentCommand::Stop { id: playback_id.clone() }).await;
+                            break Err("audio hold lease closed".into());
+                        }
+                    }
+                    _ = &mut expiry => {
+                        let _ = commands.send(ResidentCommand::Stop { id: playback_id.clone() }).await;
+                        let _ = resident_result.await;
+                        break Err("audio hold lease expired".into());
+                    }
+                }
+            };
+            let phase = match &result {
+                Ok(_) => "finished",
+                Err(error)
+                    if error == "audio stopped by operator"
+                        || error == "audio hold lease expired" =>
+                {
+                    "stopped"
+                }
+                Err(_) => "failed",
+            };
+            let detail = result.clone().unwrap_or_else(|error| error);
+            let mut inner = runtime.inner.lock().unwrap();
+            if let Some(voice) = inner.voices.get_mut(&playback_id) {
+                voice.status.phase = phase;
+                voice.status.detail = detail.clone();
+            }
+            if inner.hold_keys.get(&hold_key) == Some(&playback_id) {
+                inner.hold_keys.remove(&hold_key);
+            }
+            drop(inner);
+            log.note_kind("audio", format!("Audio {playback_id}: {phase} — {detail}"));
+        });
+        Ok(format!("audio hold `{key}` started"))
+    }
+
+    pub fn stop_hold(&self, key: &str) -> Result<String, String> {
+        let mut inner = self.inner.lock().unwrap();
+        let Some(id) = inner.hold_keys.remove(key) else {
+            return Ok(format!("audio hold `{key}` already stopped"));
+        };
+        let voice = inner
+            .voices
+            .get(&id)
+            .ok_or_else(|| format!("audio hold `{key}` lost its playback"))?;
+        if voice.status.phase == "playing" {
+            voice
+                .stop
+                .send(true)
+                .map_err(|_| "audio player unavailable")?;
+        }
+        Ok(format!("audio hold `{key}` stopped"))
+    }
+
     async fn ensure_resident_channel(&self, output: &Output) -> Result<ResidentChannel, String> {
         let backend = output.backend.clone().ok_or("output has no audio sink")?;
         let mut channels = self.resident_channels.lock().await;
@@ -592,6 +818,7 @@ impl AudioRuntime {
         volume: Option<f32>,
         log: &WorkflowHub,
         generation: u64,
+        looped: bool,
     ) -> Result<Ticket, String> {
         let track = self.tracks.get(track).ok_or("unknown audio track")?;
         if !track.file.is_file() {
@@ -614,9 +841,6 @@ impl AudioRuntime {
                 latency: None,
             },
         };
-        let command = PipeWire::default()
-            .playback_command(&request)
-            .map_err(|error| error.to_string())?;
         let id = uuid::Uuid::new_v4().to_string();
         let watched_output = output.id.clone();
         let watched_backend = output.backend.clone();
@@ -629,13 +853,7 @@ impl AudioRuntime {
             if inner.stop_generation != generation {
                 return Err("audio start cancelled by STOP ALL".into());
             }
-            let child = Command::from(command)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::inherit())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|error| error.to_string())?;
+            let child = spawn_playback(&request)?;
             while inner.voices.len() >= 128 {
                 let oldest = inner
                     .voices
@@ -653,13 +871,19 @@ impl AudioRuntime {
                 id.clone(),
                 Voice {
                     stop,
+                    lease: None,
                     status: Playback {
                         id: id.clone(),
                         track: track.id.clone(),
                         output: output.id,
                         phase: "playing",
                         started_at_ms: now_ms(),
-                        detail: format!("{} → {}", track.label, output.label),
+                        detail: format!(
+                            "{} → {}{}",
+                            track.label,
+                            output.label,
+                            if looped { " (looping)" } else { "" }
+                        ),
                     },
                 },
             );
@@ -667,7 +891,13 @@ impl AudioRuntime {
         };
         log.note_kind(
             "audio",
-            format!("Audio {}: {} → {}", id, track.label, output.label),
+            format!(
+                "Audio {}: {} → {}{}",
+                id,
+                track.label,
+                output.label,
+                if looped { " (looping)" } else { "" }
+            ),
         );
         let runtime = self.clone();
         let playback_id = id.clone();
@@ -683,21 +913,31 @@ impl AudioRuntime {
                     }
                 }
             };
-            let (phase, result) = tokio::select! {
-                biased;
-                _ = stopping.changed() => {
-                    let result = child.kill().await;
-                    if let Err(error) = result { ("failed", Err(format!("could not stop audio: {error}"))) }
-                    else { ("stopped", Err("audio stopped by operator".to_string())) }
-                }
-                status = child.wait() => match status {
-                    Ok(status) if status.success() => ("finished", Ok("audio playback finished".to_string())),
-                    Ok(status) => ("failed", Err(format!("audio player exited: {status}"))),
-                    Err(error) => ("failed", Err(error.to_string())),
-                },
-                _ = lost_output => {
-                    let _ = child.kill().await;
-                    ("failed", Err("selected audio output disconnected or changed".to_string()))
+            tokio::pin!(lost_output);
+            let (phase, result) = loop {
+                let outcome = tokio::select! {
+                    biased;
+                    _ = stopping.changed() => {
+                        let result = child.kill().await;
+                        break if let Err(error) = result { ("failed", Err(format!("could not stop audio: {error}"))) }
+                        else { ("stopped", Err("audio stopped by operator".to_string())) };
+                    }
+                    status = child.wait() => status,
+                    _ = &mut lost_output => {
+                        let _ = child.kill().await;
+                        break ("failed", Err("selected audio output disconnected or changed".to_string()));
+                    }
+                };
+                match outcome {
+                    Ok(status) if status.success() && looped => match spawn_playback(&request) {
+                        Ok(next) => child = next,
+                        Err(error) => break ("failed", Err(error)),
+                    },
+                    Ok(status) if status.success() => {
+                        break ("finished", Ok("audio playback finished".to_string()));
+                    }
+                    Ok(status) => break ("failed", Err(format!("audio player exited: {status}"))),
+                    Err(error) => break ("failed", Err(error.to_string())),
                 }
             };
             let detail = result.clone().unwrap_or_else(|error| error);
@@ -712,7 +952,8 @@ impl AudioRuntime {
     }
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        inner.hold_keys.retain(|_, playback| playback != id);
         let voice = inner.voices.get(id).ok_or("unknown playback")?;
         if voice.status.phase == "playing" {
             voice
@@ -726,6 +967,7 @@ impl AudioRuntime {
     pub fn stop_all(&self) {
         let mut inner = self.inner.lock().unwrap();
         inner.stop_generation = inner.stop_generation.wrapping_add(1);
+        inner.hold_keys.clear();
         for voice in inner
             .voices
             .values()
@@ -800,6 +1042,19 @@ impl AudioRuntime {
     }
 }
 
+fn spawn_playback(request: &PlaybackRequest) -> Result<tokio::process::Child, String> {
+    let command = PipeWire::default()
+        .playback_command(request)
+        .map_err(|error| error.to_string())?;
+    Command::from(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| error.to_string())
+}
+
 async fn spawn_resident_channel(
     output_id: String,
     backend: String,
@@ -855,11 +1110,12 @@ async fn run_resident_channel(
         tokio::select! {
             biased;
             command = commands.recv() => match command {
-                Some(ResidentCommand::Play { id, clip, volume, done }) => {
+                Some(ResidentCommand::Play { id, clip, volume, loop_range, done }) => {
                     voices.insert(id, ResidentVoice {
                         samples: Arc::clone(&clip.samples),
                         cursor: 0,
                         volume,
+                        loop_range,
                         done,
                     });
                 }
@@ -897,17 +1153,27 @@ fn mix_resident_chunk(
     let mut mixed = vec![0_i32; sample_count];
     let mut finished_ids = Vec::new();
     for (id, voice) in voices.iter_mut() {
-        let remaining = voice.samples.len().saturating_sub(voice.cursor);
-        let count = remaining.min(sample_count);
-        for (output, sample) in mixed[..count]
-            .iter_mut()
-            .zip(&voice.samples[voice.cursor..voice.cursor + count])
-        {
-            *output += (f32::from(*sample) * voice.volume).round() as i32;
-        }
-        voice.cursor += count;
-        if voice.cursor == voice.samples.len() {
-            finished_ids.push(id.clone());
+        if let Some((loop_start, loop_end)) = voice.loop_range {
+            for output in &mut mixed {
+                *output += (f32::from(voice.samples[voice.cursor]) * voice.volume).round() as i32;
+                voice.cursor += 1;
+                if voice.cursor == loop_end {
+                    voice.cursor = loop_start;
+                }
+            }
+        } else {
+            let remaining = voice.samples.len().saturating_sub(voice.cursor);
+            let count = remaining.min(sample_count);
+            for (output, sample) in mixed[..count]
+                .iter_mut()
+                .zip(&voice.samples[voice.cursor..voice.cursor + count])
+            {
+                *output += (f32::from(*sample) * voice.volume).round() as i32;
+            }
+            voice.cursor += count;
+            if voice.cursor == voice.samples.len() {
+                finished_ids.push(id.clone());
+            }
         }
     }
     let mut bytes = Vec::with_capacity(sample_count * 2);
@@ -921,6 +1187,14 @@ fn mix_resident_chunk(
         .filter_map(|id| voices.remove(&id))
         .collect();
     (bytes, finished)
+}
+
+fn resident_sample_offset(milliseconds: u64) -> usize {
+    milliseconds
+        .saturating_mul(u64::from(RESIDENT_RATE))
+        .saturating_mul(RESIDENT_CHANNELS as u64)
+        .saturating_div(1000)
+        .min(usize::MAX as u64) as usize
 }
 
 fn decode_resident_wav(path: &std::path::Path) -> Result<ResidentClip, String> {
@@ -1121,6 +1395,7 @@ mod tests {
                 errors: vec![],
                 refreshed: Some(Instant::now()),
                 voices: BTreeMap::new(),
+                hold_keys: BTreeMap::new(),
                 stop_generation: 0,
             })),
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -1132,7 +1407,14 @@ mod tests {
         };
         runtime.stop_all();
         let result = runtime
-            .play_in_generation("test", "test-output", None, &WorkflowHub::default(), 0)
+            .play_in_generation(
+                "test",
+                "test-output",
+                None,
+                &WorkflowHub::default(),
+                0,
+                false,
+            )
             .await;
         assert!(matches!(result, Err(error) if error.contains("STOP ALL")));
         assert!(runtime.inner.lock().unwrap().voices.is_empty());

@@ -4,7 +4,7 @@ type Track = { id: string; label: string; format: string; fileName: string; avai
 type Output = { id: string; label: string; kind: string; aliases: string[]; paired: boolean; connected: boolean; ready: boolean; percent: number | null; muted: boolean }
 type Playback = { id: string; track: string; output: string; phase: string; startedAtMs: number; detail: string }
 type AudioStatus = { host: string; tracks: Track[]; outputs: Output[]; playbacks: Playback[]; errors: string[]; maxActive: number }
-type Action = { type: 'play'; output: string; track: string } | { type: 'stop'; playback: string }
+type Action = { type: 'play'; output: string; track: string; loop?: boolean } | { type: 'stop'; playback: string }
   | { type: 'volume'; output: string; percent: number } | { type: 'connect' | 'disconnect'; output: string }
 
 function AudioOutputCard({ output, tracks, playbacks, unavailable, busy, action }: {
@@ -12,6 +12,7 @@ function AudioOutputCard({ output, tracks, playbacks, unavailable, busy, action 
   action: (body: Action, key: string) => Promise<boolean>
 }) {
   const [choice, setChoice] = useState('')
+  const [loop, setLoop] = useState(false)
   const [draftVolume, setDraftVolume] = useState<number | null>(null)
   const volumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const volumeVersion = useRef(0)
@@ -46,8 +47,9 @@ function AudioOutputCard({ output, tracks, playbacks, unavailable, busy, action 
         {!selected && <option value="">No tracks available</option>}
         {tracks.map(track => <option value={track.id} key={track.id} disabled={!track.available}>{track.label} · {track.format}{track.durationMs != null ? ` · ${(track.durationMs / 1000).toFixed(2)}s` : ''}{!track.available ? ' · missing file' : ''}</option>)}
       </select></label>
+      <label className="audio-loop"><input type="checkbox" checked={loop} onChange={event => setLoop(event.target.checked)} />Loop</label>
       <button type="button" className="audio-play" disabled={unavailable || !output.ready || !selected || busy.has(output.id)}
-        onClick={() => void action({ type: 'play', output: output.id, track: selected }, output.id)}>Play</button>
+        onClick={() => void action({ type: 'play', output: output.id, track: selected, loop }, output.id)}>{loop ? 'Start loop' : 'Play'}</button>
     </div>
     <label className="volume-control"><span>Volume{output.muted ? ' (muted)' : ''}</span>
       <input type="range" aria-label={`${output.label} volume`} min={0} max={100} value={draftVolume ?? output.percent ?? 0}
