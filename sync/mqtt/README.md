@@ -176,6 +176,8 @@ local curve evaluator.
 5. Build and flash the matching `*-mqtt` images. Do not flash `sync-gateway`:
 
    ```sh
+   arduino-cli core install esp32:esp32@3.3.12
+
    arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 \
      --libraries firmware/lib sync/firmware/arduino/sync-dc-mqtt
 
@@ -184,10 +186,16 @@ local curve evaluator.
 
    arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 \
      --libraries firmware/lib sync/firmware/arduino/sync-remote-mqtt
+
+   arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 \
+     --libraries firmware/lib sync/firmware/arduino/sync-horn-mqtt
    ```
 
    Install the official `ArduinoMqttClient` library first when using Arduino
-   CLI. PlatformIO resolves it from `platformio.ini`.
+   CLI. Use Espressif Arduino core 3.3.12 or newer for the horn. The older
+   Arduino 2.0.17 stack bundled by the current PlatformIO profile repeatedly
+   failed WPA2 authentication on the installed horn board even with the same
+   credentials and strong signal; core 3.3.12 associated and joined MQTT.
 6. Run the MQTT show profile on the Pi:
 
    ```sh
@@ -195,7 +203,7 @@ local curve evaluator.
      --config sync/shows/integration-mqtt.toml
    ```
 
-7. Before motor power is connected, confirm the three boards appear online in
+7. Before motor power is connected, confirm the four boards appear online in
    `/control/`, then issue stop and motion commands and watch for MQTT delivery
    reports in the `fx` log. Apply motor power to one controller at a time.
 
