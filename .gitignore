@@ -35,6 +35,7 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .venv/
+.mesh_tools/
 **/target/
 /fx/target-aarch64-linux/
 **/.pio/

@@ -78,6 +78,28 @@ All are grouped near the top of `generate_carrier.py`.
   continuous bottom foot and full-length attachment rail rather than isolated
   mounting ears.
 
+### Single-piece integrated vertical-battery carrier
+
+- `output/motor-driver-carrier-integrated-vertical-battery.stl` — the revised
+  motor-driver carrier and vertical battery holder fused into one printable
+  solid, with no overlapping attachment hardware.
+- `output/motor-driver-carrier-integrated-vertical-battery.step` — editable
+  single-solid STEP.
+- `output/motor-driver-carrier-integrated-vertical-battery-fit-check.step` —
+  integrated carrier plus the 67 × 36 × 10 mm battery envelope.
+
+The integrated holder uses a top-open access window instead of a closed
+rectangular window, removing its long horizontal bridge.  Print it flat in the
+exported orientation; the battery holder and carrier do not require generated
+supports.  The obsolete small-battery sled beneath the controller PCB is
+removed from this integrated revision.  The outer 13.5 × 4 mm Velcro slot
+begins at floor level.  The inner
+slot is raised above the adjacent controller-bumper wall, avoiding a narrow
+enclosed passage between the two printed walls.  Thread the strap through the
+low outer slot, across the pocket floor beneath the battery, upward inside the
+inner wall, and out the raised slot before closing it over the battery.  The
+printed underside is flat; there is no recessed strap channel beneath the part.
+
 ## Generate
 
 ```sh

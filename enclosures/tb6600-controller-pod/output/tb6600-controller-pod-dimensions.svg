@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200">
+<defs>
+  <marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><path d="M 8 0 L 0 4 L 8 8 z" fill="#174a7e"/></marker>
+</defs>
+<style>
+  text { font-family: Arial, Helvetica, sans-serif; fill: #18212a; }
+  .title { font-size: 34px; font-weight: 700; }
+  .subtitle { font-size: 20px; fill: #4a5968; }
+  .body { fill: #edf1f4; stroke: #18212a; stroke-width: 4; }
+  .board { fill: none; stroke: #238636; stroke-width: 3; stroke-dasharray: 12 8; }
+  .battery { fill: none; stroke: #d97706; stroke-width: 3; stroke-dasharray: 12 8; }
+  .root { fill: #bdc8d2; stroke: #18212a; stroke-width: 3; }
+  .arm { fill: #dbe3e9; stroke: #18212a; stroke-width: 3; }
+  .hook { fill: #5d6b78; stroke: #18212a; stroke-width: 2; }
+  .centerline { stroke: #8a96a3; stroke-width: 2; stroke-dasharray: 8 8; }
+  .dim { stroke: #174a7e; stroke-width: 2.5; }
+  .ext { stroke: #7f8b96; stroke-width: 1.5; }
+  .dimtext { font-size: 19px; font-weight: 700; fill: #174a7e; paint-order: stroke; stroke: white; stroke-width: 5; }
+  .section { font-size: 24px; font-weight: 700; }
+  .tablehead { font-size: 19px; font-weight: 700; fill: white; }
+  .tabletext { font-size: 18px; }
+  .note { font-size: 17px; fill: #4a5968; }
+</style>
+<rect width="100%" height="100%" fill="white"/>
+<text x="70" y="58" class="title">TB6600 controller pod — nominal dimensions</text>
+<text x="70" y="90" class="subtitle">All dimensions in millimetres. Plan view is looking at the PCB face.</text>
+<text x="70" y="135" class="section">PLAN VIEW / CLIP SPACING</text>
+<rect x="155.03" y="256.86" width="689.94" height="386.28" rx="27.00" class="body"/>
+<rect x="178.43" y="307.35" width="643.14" height="285.30" rx="14.40" class="board"/>
+<rect x="197.92" y="280.26" width="604.17" height="339.48" rx="14.40" class="battery"/>
+<line x1="500.00" y1="193.86" x2="500.00" y2="706.14" class="centerline"/>
+<rect x="113.14" y="563.99" width="43.24" height="40.50" rx="0.00" class="root"/>
+<rect x="114.49" y="563.99" width="21.60" height="40.50" rx="0.00" class="arm"/>
+<rect x="136.09" y="573.88" width="14.40" height="20.70" rx="0.00" class="hook"/>
+<rect x="843.62" y="563.99" width="43.24" height="40.50" rx="0.00" class="root"/>
+<rect x="863.91" y="563.99" width="21.60" height="40.50" rx="0.00" class="arm"/>
+<rect x="849.51" y="573.88" width="14.40" height="20.70" rx="0.00" class="hook"/>
+<rect x="113.14" y="295.51" width="43.24" height="40.50" rx="0.00" class="root"/>
+<rect x="114.49" y="295.51" width="21.60" height="40.50" rx="0.00" class="arm"/>
+<rect x="136.09" y="305.42" width="14.40" height="20.70" rx="0.00" class="hook"/>
+<rect x="843.62" y="295.51" width="43.24" height="40.50" rx="0.00" class="root"/>
+<rect x="863.91" y="295.51" width="21.60" height="40.50" rx="0.00" class="arm"/>
+<rect x="849.51" y="305.42" width="14.40" height="20.70" rx="0.00" class="hook"/>
+<line x1="155.03" y1="643.14" x2="155.03" y2="715.14" class="ext"/>
+<line x1="844.97" y1="643.14" x2="844.97" y2="715.14" class="ext"/>
+<line x1="155.03" y1="697.14" x2="844.97" y2="697.14" class="dim" marker-start="url(#arrow)" marker-end="url(#arrow)"/><text x="500.00" y="687.14" class="dimtext" text-anchor="middle">BODY 76.66</text>
+<line x1="136.09" y1="193.86" x2="863.91" y2="193.86" class="dim" marker-start="url(#arrow)" marker-end="url(#arrow)"/><text x="500.00" y="183.86" class="dimtext" text-anchor="middle">80.87 BETWEEN OPPOSING ARM INNER FACES</text>
+<line x1="912.47" y1="643.14" x2="912.47" y2="256.86" class="dim" marker-start="url(#arrow)" marker-end="url(#arrow)"/><text x="930.47" y="450.00" class="dimtext" text-anchor="middle" transform="rotate(-90 930.47 450.00)">BODY 42.92</text>
+<line x1="948.51" y1="584.24" x2="948.51" y2="315.76" class="dim" marker-start="url(#arrow)" marker-end="url(#arrow)"/><text x="966.51" y="450.00" class="dimtext" text-anchor="middle" transform="rotate(-90 966.51 450.00)">CLIP CENTRES 29.83</text>
+<line x1="993.51" y1="573.88" x2="993.51" y2="326.12" class="dim" marker-start="url(#arrow)" marker-end="url(#arrow)"/><text x="1011.51" y="450.00" class="dimtext" text-anchor="middle" transform="rotate(-90 1011.51 450.00)">HOOK CLEAR GAP 27.53</text>
+<text x="75" y="760" class="note"><tspan fill="#238636">Green dashed:</tspan> PCB pocket</text>
+<text x="330" y="760" class="note"><tspan fill="#d97706">Orange dashed:</tspan> battery tunnel</text>
+<text x="75" y="792" class="note">The measured 27.00 mm value is the driver vent edge gap, not the printed hook gap.</text>
+<rect x="1030" y="142" width="700" height="48" rx="8" fill="#174a7e"/>
+<text x="1050" y="173" class="tablehead">DIMENSION</text>
+<text x="1530" y="173" class="tablehead">VALUE</text>
+<rect x="1030" y="190" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="221" class="tabletext">Unified body</text>
+<text x="1530" y="221" class="tabletext">76.66 × 42.92</text>
+<rect x="1030" y="238" width="700" height="48" fill="#ffffff" stroke="#c9d2da"/>
+<text x="1050" y="269" class="tabletext">Overall X including root ribs</text>
+<text x="1530" y="269" class="tabletext">85.97</text>
+<rect x="1030" y="286" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="317" class="tabletext">PCB pocket</text>
+<text x="1530" y="317" class="tabletext">71.46 × 31.70</text>
+<rect x="1030" y="334" width="700" height="48" fill="#ffffff" stroke="#c9d2da"/>
+<text x="1050" y="365" class="tabletext">Battery tunnel</text>
+<text x="1530" y="365" class="tabletext">67.13 × 37.72 × 11.00</text>
+<rect x="1030" y="382" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="413" class="tabletext">Clip centre spacing along Y</text>
+<text x="1530" y="413" class="tabletext">29.83</text>
+<rect x="1030" y="430" width="700" height="48" fill="#ffffff" stroke="#c9d2da"/>
+<text x="1050" y="461" class="tabletext">Flexible-arm clear gap</text>
+<text x="1530" y="461" class="tabletext">25.33</text>
+<rect x="1030" y="478" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="509" class="tabletext">Hook clear edge gap</text>
+<text x="1530" y="509" class="tabletext">27.53</text>
+<rect x="1030" y="526" width="700" height="48" fill="#ffffff" stroke="#c9d2da"/>
+<text x="1050" y="557" class="tabletext">Target vent clear edge gap</text>
+<text x="1530" y="557" class="tabletext">27.00</text>
+<rect x="1030" y="574" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="605" class="tabletext">Vent slot / printed hook width</text>
+<text x="1530" y="605" class="tabletext">2.83 / 2.30</text>
+<rect x="1030" y="622" width="700" height="48" fill="#ffffff" stroke="#c9d2da"/>
+<text x="1050" y="653" class="tabletext">Opposing arm inner faces</text>
+<text x="1530" y="653" class="tabletext">80.87</text>
+<rect x="1030" y="670" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="701" class="tabletext">Driver body span</text>
+<text x="1530" y="701" class="tabletext">80.27</text>
+<rect x="1030" y="718" width="700" height="48" fill="#ffffff" stroke="#c9d2da"/>
+<text x="1050" y="749" class="tabletext">Arm-to-driver clearance</text>
+<text x="1530" y="749" class="tabletext">0.30 each side</text>
+<rect x="1030" y="766" width="700" height="48" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1050" y="797" class="tabletext">Hook reach</text>
+<text x="1530" y="797" class="tabletext">1.60</text>
+<text x="1030" y="835" class="section">STACK / Z LEVELS</text>
+<rect x="1030" y="870" width="700" height="250" rx="10" fill="#f4f7f9" stroke="#c9d2da"/>
+<text x="1060" y="913" class="tabletext">Driver-facing floor thickness</text><text x="1540" y="913" class="tabletext">3.20</text>
+<text x="1060" y="951" class="tabletext">Battery envelope top</text><text x="1540" y="951" class="tabletext">Z = 13.20</text>
+<text x="1060" y="989" class="tabletext">PCB seating plane</text><text x="1540" y="989" class="tabletext">Z = 18.20</text>
+<text x="1060" y="1027" class="tabletext">Battery-to-PCB clearance</text><text x="1540" y="1027" class="tabletext">5.00</text>
+<text x="1060" y="1065" class="tabletext">Outer body height</text><text x="1540" y="1065" class="tabletext">20.45</text>
+<text x="70" y="1160" class="note">Nominal CAD values. Print the dual-hook spacing coupon before the full pod and compensate for measured PETG shrink or elephant foot.</text>
+</svg>
