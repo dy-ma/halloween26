@@ -24,11 +24,11 @@ link = "inbound"
 type = "audio"
 file = "/home/dyma/audio/horn.wav"
 
-# A ready but normally unconnected Pi output. The action is muted, and this
-# isolated profile never selects the production JBL alias.
+# Exercise the same Bluetooth output route as production at a zero stream
+# volume, so the smoke test verifies mixing without making audible sound.
 [sinks.test_audio]
 type = "audio"
-device = "alsa_output.platform-fe00b840.mailbox.stereo-fallback"
+device = "jbl"
 volume = 0.0
 
 [sinks.eye]
@@ -72,14 +72,14 @@ trigger = { source = "horn", cue = "horn:pushed" }
 
 [[flows.horn_audio.nodes]]
 id = "horn"
-action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, loop_start_ms = 484, loop_end_ms = 710, lease_ms = 1200 }
+action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, loop_start_ms = 484, loop_end_ms = 710, lease_ms = 3000 }
 
 [flows.horn_held]
 trigger = { source = "horn", cue = "horn:held" }
 
 [[flows.horn_held.nodes]]
 id = "horn"
-action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, loop_start_ms = 484, loop_end_ms = 710, lease_ms = 1200 }
+action = { type = "audio.hold.start", key = "horn", sink = "test_audio", asset = "horn", volume = 0.0, loop_start_ms = 484, loop_end_ms = 710, lease_ms = 3000 }
 
 [flows.horn_released]
 trigger = { source = "horn", cue = "horn:released" }
@@ -89,7 +89,7 @@ id = "horn"
 action = { type = "audio.hold.stop", key = "horn" }
 
 [flows.show]
-trigger = { source = "horn", cue = "horn:pushed", aliases = ["show:start"] }
+trigger = { source = "horn", cue = "horn:show", aliases = ["show:start"] }
 role = "show"
 
 [[flows.show.nodes]]

@@ -147,9 +147,10 @@ snapshot, including pending transitions and their execution times, is available
 through `/api/status` for the future graph UI.
 
 One wire event may intentionally match multiple flows. Utility flows dispatch
-first, then stateful flows. The horn uses this to split one `horn:pushed` packet
-into immediate resident audio and a separate `show` request: audio feedback is
-not permission-gated, while choreography remains accepted only from Ready.
+first, then stateful flows. The horn starts immediate resident audio with
+`horn:pushed`, then emits one `horn:show` request after a 600 ms deliberate
+hold: audio feedback is not permission-gated, while choreography remains
+accepted only from Ready. A short tap therefore honks without starting a show.
 Trigger `aliases` allow the same choreography to retain an operator/legacy cue
 without copying its node graph.
 

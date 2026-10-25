@@ -18,6 +18,9 @@
 namespace {
 
 constexpr uint32_t kDebounceMs = 30;
+// A tap is still a real horn press, but the larger show is requested only
+// after the operator has held the button deliberately for this long.
+constexpr uint32_t kShowHoldMs = 600;
 // A held switch periodically renews the Pi-side horn lease. If this board,
 // Wi-Fi, MQTT, or FX disappears, the lease expires instead of leaving a horn
 // droning forever.
@@ -26,6 +29,7 @@ constexpr uint64_t kCoordinatorNode = CUE_COORDINATOR_NODE;
 constexpr char kHornPushedEvent[] = "horn:pushed";
 constexpr char kHornHeldEvent[] = "horn:held";
 constexpr char kHornReleasedEvent[] = "horn:released";
+constexpr char kHornShowEvent[] = "horn:show";
 
 sync_transport::Transport::Config transport_config = sync_transport::config("horn");
 sync_transport::Transport transport(transport_config);
@@ -34,6 +38,8 @@ bool reading = HORN_SWITCH_ACTIVE_LEVEL != HIGH;
 bool stable = HORN_SWITCH_ACTIVE_LEVEL != HIGH;
 uint32_t changed_at = 0;
 uint32_t next_held_at = 0;
+uint32_t pressed_at = 0;
+bool show_requested = false;
 
 void sendHorn(const char* event) {
   if (kCoordinatorNode == 0) {
@@ -65,6 +71,8 @@ void updateSwitch(uint32_t now) {
     stable = reading;
     if (stable == HORN_SWITCH_ACTIVE_LEVEL) {
       sendHorn(kHornPushedEvent);
+      pressed_at = now;
+      show_requested = false;
       next_held_at = now + kHeldIntervalMs;
     } else {
       sendHorn(kHornReleasedEvent);
@@ -74,6 +82,11 @@ void updateSwitch(uint32_t now) {
       static_cast<int32_t>(now - next_held_at) >= 0) {
     sendHorn(kHornHeldEvent);
     next_held_at = now + kHeldIntervalMs;
+  }
+  if (stable == HORN_SWITCH_ACTIVE_LEVEL && !show_requested &&
+      now - pressed_at >= kShowHoldMs) {
+    sendHorn(kHornShowEvent);
+    show_requested = true;
   }
 }
 
@@ -90,7 +103,9 @@ void setup() {
   }
   if (ready && stable == HORN_SWITCH_ACTIVE_LEVEL) {
     sendHorn(kHornPushedEvent);
-    next_held_at = millis() + kHeldIntervalMs;
+    pressed_at = millis();
+    show_requested = false;
+    next_held_at = pressed_at + kHeldIntervalMs;
   }
   if (Serial) {
     Serial.printf(

@@ -94,31 +94,47 @@ try {
   let audio = await read('/api/audio')
   assert.equal(audio.playbacks.filter(playback => playback.phase === 'playing').length, 1, 'heartbeat must not layer another horn')
   assert.equal(audio.playbacks.find(playback => playback.phase === 'playing').id, first.id, 'heartbeat must renew the existing horn')
-  await publish(cue(3n, 'horn:released'))
-  await until(async () => (await read('/api/audio')).playbacks.find(playback => playback.id === first.id)?.phase === 'stopped')
+  await publish(cue(3n, 'horn:show'))
+  await wait(100)
+  state = await read('/api/status')
+  assert.ok(!state.runs.some(run => run.role === 'show'), 'held show request must still be rejected before reset')
+  assert.deepEqual(commands, [])
+  await publish(cue(4n, 'horn:released'))
+  await until(async () => {
+    const playback = (await read('/api/audio')).playbacks.find(item => item.id === first.id)
+    return playback?.phase === 'stopped' && playback.detail === 'audio stopped by operator'
+  })
 
   await control('reset')
   await until(async () => (await read('/api/status')).state.mode === 'ready')
   const runsBefore = (await read('/api/status')).runs.length
-  await publish(cue(4n))
+  await publish(cue(5n))
+  await publish(cue(6n, 'horn:held'))
+  await publish(cue(7n, 'horn:show'))
   await until(async () => {
     const current = await read('/api/status')
     return current.state.mode === 'needs-reset' && current.runs.some(run => run.role === 'show')
   })
   assert.deepEqual(commands, ['eye/wake'])
   state = await read('/api/status')
-  assert.ok(state.runs.length >= runsBefore + 2, 'one press must create audio and accepted-show runs')
+  assert.ok(state.runs.length >= runsBefore + 3, 'press, held renewal, and show request must remain separate runs')
   const afterAccepted = state.runs.length
-  await publish(cue(4n))
+  await publish(cue(7n, 'horn:show'))
   await wait(200)
-  assert.equal((await read('/api/status')).runs.length, afterAccepted, 'duplicate delivery must not replay horn or show')
-  await publish(cue(5n, 'horn:released'))
-  await until(async () => !(await read('/api/audio')).playbacks.some(playback => playback.phase === 'playing'))
+  assert.equal((await read('/api/status')).runs.length, afterAccepted, 'duplicate show delivery must not replay the show')
+  await publish(cue(8n, 'horn:held'))
+  const acceptedHorn = (await read('/api/audio')).playbacks.find(playback => playback.phase === 'playing')
+  assert.ok(acceptedHorn, 'accepted held show must leave the independent horn playing until release')
+  await publish(cue(9n, 'horn:released'))
+  await until(async () => {
+    const playback = (await read('/api/audio')).playbacks.find(item => item.id === acceptedHorn.id)
+    return playback?.phase === 'stopped' && playback.detail === 'audio stopped by operator'
+  })
 
-  await publish(cue(6n))
+  await publish(cue(10n))
   const leased = await until(async () => (await read('/api/audio')).playbacks.find(playback => playback.phase === 'playing'))
   await until(async () => (await read('/api/audio')).playbacks.find(playback => playback.id === leased.id)?.detail === 'audio hold lease expired', 3000)
-  console.log('PASS: press starts one unconditional resident horn and one state-gated show request; held renews without layering; release stops; lost release expires; accepted show follows timing rules; duplicate MQTT delivery replays neither branch')
+  console.log('PASS: press starts unconditional resident horn; held renews without layering; a separate held-threshold event requests the state-gated show; release stops; lost release expires; duplicate MQTT delivery does not replay the show')
 } finally {
   await control('stop').catch(() => {})
   for (const socket of sockets) socket.terminate()

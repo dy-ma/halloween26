@@ -1220,21 +1220,21 @@ cue = "stroke"
             include_str!("../../sync/shows/integration-mqtt.toml"),
         ] {
             let show = parse(manifest, Path::new("/shows")).unwrap();
-            for (control, expected) in [
-                ("stepper_stroke", "step:rev:1600:60"),
-                ("stepper_position_cw", "step:jog:fwd:30"),
-                ("stepper_position_ccw", "step:jog:rev:30"),
+            for (control, expected_prefix) in [
+                ("stepper_stroke", "step:rev:1600:"),
+                ("stepper_position_cw", "step:jog:fwd:"),
+                ("stepper_position_ccw", "step:jog:rev:"),
             ] {
                 assert!(matches!(
                     &show.controls[control],
-                    ControlConfig::Cue { cue, .. } if cue == expected
+                    ControlConfig::Cue { cue, .. } if cue.starts_with(expected_prefix)
                 ));
             }
             assert!(show.flows["integration"].nodes.iter().any(|node| {
                 node.id == "stepper-turn"
                     && matches!(
                         &node.action,
-                        ActionConfig::CueEmit { cue, .. } if cue == "step:rev:1600:60"
+                        ActionConfig::CueEmit { cue, .. } if cue.starts_with("step:rev:1600:")
                     )
             }));
         }

@@ -74,16 +74,18 @@ id = "horn"
 action = { type = "audio.hold.stop", key = "horn" }
 
 [flows.show]
-trigger = { source = "remote", cue = "horn:pushed", aliases = ["show:start"] }
+trigger = { source = "remote", cue = "horn:show", aliases = ["show:start"] }
 role = "show"
 ```
 
 Utility flows are dispatched before stateful flows. Consequently the horn is
 direct feedback and sounds even when the controller rejects the show request;
 the eye and physical assemblies still run only when the controller is Ready.
-Only `horn:pushed` requests the show; renew/release packets are audio-only. A
-hold start is idempotent by key, and Cue IDs are deduplicated, so heartbeats and
-MQTT retries cannot layer copies or restart the show.
+`horn:pushed` starts audio immediately. After a 600 ms hold, the horn board
+sends one `horn:show` request; short taps never request choreography.
+Renew/release packets are audio-only. A hold start is idempotent by key, and
+Cue IDs are deduplicated, so heartbeats and MQTT retries cannot layer copies or
+restart the show.
 
 By default the entire resident clip loops. For a more natural extendable horn,
 keep an attack at the front of the WAV and choose a steady, zero-crossing loop
@@ -93,6 +95,11 @@ attack plays once; only that region repeats. The production `horn.wav` is a
 waveform-matched sustain runs from 484 through 710 ms. Release currently stops
 immediately, which is appropriate for a push-button horn and can later be
 extended with a separate release tail if the source recording needs one.
+
+The production choreography uses `tractor_tipping_no_horn.wav`. It keeps the
+original 9.54 second duration and replaces the opening horn with silence plus a
+short fade into the remaining tractor sound. This preserves every motion cue's
+timeline while the independently held horn voice supplies the live horn.
 
 ## Library and future clips
 

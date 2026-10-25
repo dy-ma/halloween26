@@ -14,9 +14,10 @@ Future work and field observations are tracked in [BACKLOG.md](BACKLOG.md).
 - `sync-remote`: battery/remote XIAO. Its start button sends `show:start` and an
   optional second button sends `show:stop` to the configured gateway node.
 - `sync-horn-mqtt`: single-switch XIAO for the physical horn. A debounced press
-  on D10 sends `horn:pushed`, a held switch renews with `horn:held` every 400 ms,
-  and release sends `horn:released`. Wire a normally-open switch between D10
-  and GND; the firmware uses `INPUT_PULLUP` and triggers on the falling edge.
+  on D10 sends `horn:pushed` immediately, a held switch renews with `horn:held`
+  every 400 ms, a deliberate 600 ms hold sends one `horn:show`, and release
+  sends `horn:released`. Wire a normally-open switch between D10 and GND; the
+  firmware uses `INPUT_PULLUP` and triggers on the falling edge.
 - `sync-dc`: flash the same image onto both BTS7960 controller boards. Their MAC
   addresses distinguish `dc_a` from `dc_b` in the show file.
 - `sync-dc-expansion`: wireless-only DC firmware for the six-wire BTS7960

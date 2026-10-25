@@ -29,6 +29,10 @@ link = "radio"
 type = "audio"
 file = "/home/dyma/audio/tractor_tipping_trimmed.wav"
 
+[assets.tractor_tip_no_horn]
+type = "audio"
+file = "/home/dyma/audio/tractor_tipping_no_horn.wav"
+
 [assets.horn]
 type = "audio"
 file = "/home/dyma/audio/horn.wav"
@@ -117,33 +121,38 @@ enabled = true
 url = "http://127.0.0.1:8080/?screen=tractor-eye&name=Pi-eye&client=pi-eye"
 
 [flows.integration]
-trigger = { source = "remote", cue = "horn:pushed", aliases = ["show:start"] }
+trigger = { source = "remote", cue = "horn:show", aliases = ["show:start"] }
 role = "show"
 
 [[flows.integration.nodes]]
+id = "tractor-audio"
+action = { type = "audio.play", sink = "speaker", asset = "tractor_tip_no_horn" }
+
+[[flows.integration.nodes]]
 id = "wake-eye"
+at_ms = 250
 action = { type = "screen.command", sink = "eye", command = { type = "eye/wake" }, final_state = { mode = "alert", gaze = { x = -0.2, y = -0.5 } } }
 
 [[flows.integration.nodes]]
 id = "dc-a-pulse"
-at_ms = 500
+at_ms = 4000
 transition = "lift_a.raise"
-action = { type = "cue.emit", sink = "dc_a", cue = "dc:fwd:70:500", wait_for = "dc:complete", timeout_ms = 2500 }
+action = { type = "cue.emit", sink = "dc_a", cue = "dc:c:f:153:51:300:700:3500", wait_for = "dc:complete", timeout_ms = 6000 }
 
 [[flows.integration.nodes]]
 id = "dc-b-pulse"
-at_ms = 750
+at_ms = 4000
 transition = "lift_b.raise"
-action = { type = "cue.emit", sink = "dc_b", cue = "dc:rev:70:500", wait_for = "dc:complete", timeout_ms = 2500 }
+action = { type = "cue.emit", sink = "dc_b", cue = "dc:c:r:153:51:300:700:3500", wait_for = "dc:complete", timeout_ms = 6000 }
 
 [[flows.integration.nodes]]
 id = "stepper-turn"
-at_ms = 1000
-# Hardware-timed S-curve: 60 RPM peak, acceleration/deceleration from/to rest.
+at_ms = 9000
+# Hardware-timed S-curve: 80 RPM peak, acceleration/deceleration from/to rest.
 transition = "smokestack.stroke"
-action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:60", wait_for = "step:complete", timeout_ms = 4000 }
+action = { type = "cue.emit", sink = "stepper", cue = "step:rev:1600:80", wait_for = "step:complete", timeout_ms = 4000 }
 
-# The same physical press takes two independent paths. This utility flow is
+# The physical interaction takes two independent paths. This utility flow is
 # dispatched before the state-gated show flow, so the horn sounds even when
 # the controller rejects the choreography because it is not Ready.
 [flows.horn_audio]
@@ -155,7 +164,8 @@ action = { type = "audio.hold.start", key = "horn", sink = "speaker", asset = "h
 
 # The horn board sends these while its switch remains down. Starting a named
 # hold is idempotent, so this only renews the safety lease—it cannot layer more
-# copies or request the show again.
+# copies. The separate one-shot horn:show event requests the show after the
+# deliberate-hold threshold.
 [flows.horn_held]
 trigger = { source = "remote", cue = "horn:held" }
 
